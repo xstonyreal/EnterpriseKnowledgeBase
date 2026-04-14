@@ -1,0 +1,10 @@
+langchain
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-openai
+chromadb
+ollama         #连接本地 Ollama 服务的官方客户端。
+python-dotenv  # 读取 .env 文件
+pydantic  # 数据校验库，LangChain 的基础依赖
+pydantic-settings # config 用到
