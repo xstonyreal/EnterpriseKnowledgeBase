@@ -5,8 +5,8 @@ from app.config import settings
 from app.pipeline.ingest import ingest_documents
 from app.core.engine import get_chat_response
 
-print(f"--- 当前 Python 路径: {sys.executable} ---")
-print(f"--- 已安装包搜索路径: {sys.path} ---")
+# print(f"--- 当前 Python 路径: {sys.executable} ---")
+# print(f"--- 已安装包搜索路径: {sys.path} ---")
 
 def main():
     print("🤖 企业知识库助手 (FAISS版) 已启动")

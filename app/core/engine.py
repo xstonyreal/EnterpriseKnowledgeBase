@@ -10,13 +10,35 @@ from app.models.embeddings import embeddings
 from app.config import settings
 from app.core.logger import logger
 
+
+# ==========================================================
+# 🚀 优化点：单例加载
+# 在模块加载时就完成 FAISS 初始化，避免每次提问都读硬盘
+# ==========================================================
+
+db_path = os.path.join(settings.CHROMA_PERSIST_DIR, "faiss_index")
+
+if os.path.exists(db_path):
+    logger.info(f"💾 正在将向量库载入内存: {db_path}")
+    # 这一步在 16GB 内存上只跑一次，之后提问就“秒开”了
+    vector_db = FAISS.load_local(
+        db_path,
+        embeddings,
+        allow_dangerous_deserialization=True
+    )
+else:
+    logger.warning("⚠️ 向量库路径不存在，请先执行入库脚本！")
+    vector_db = None
+
 def get_chat_response(query: str):
     """基于 LCEL 的 RAG 问答逻辑"""
+    # ✨ 核心修复：声明使用外部的全局变量
+    global vector_db
+
+    if vector_db is None:
+        return "❌ 知识库尚未初始化，请先上传文件或运行入库脚本。"
     logger.info(f"🔍 正在检索知识库: {query}")
 
-    db_path = os.path.join(settings.CHROMA_PERSIST_DIR, "faiss_index")
-    if not os.path.exists(db_path):
-        return "❌ 知识库尚未初始化，请先上传文件或运行入库脚本。"
 
     try:
         # 1. 加载库
