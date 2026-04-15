@@ -45,6 +45,12 @@ def load_documents(directory: str):
                 loader = UnstructuredFileLoader(file_path)
                 docs = loader.load()
 
+            # --- [优化：统一 Metadata 来源名] 20260415 增加文件名标签 ---
+            # 确保每个 doc 的 metadata['source'] 只是纯文件名，而不是长长的路径
+            # 这有助于后续 LLM 识别来源
+            for doc in docs:
+                doc.metadata["source"] = filename
+
             documents.extend(docs)
             logger.info(f"✅ 成功加载: {filename}")
         except Exception as e:

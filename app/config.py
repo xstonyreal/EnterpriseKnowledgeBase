@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = "ollama"
 
     # --- 核心模型选择 ---
-    LLM_MODEL: str = "qwen2.5:0.5b"
+    LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # --- 数据存储路径 ---
@@ -33,10 +33,10 @@ class Settings(BaseSettings):
     # ==========================================
     # 📝 文本处理参数 (RAG 核心参数)
     # ==========================================
-    # 分块大小：根据模型上下文窗口调整，0.5b 模型建议不要太大
-    CHUNK_SIZE: int = 500
+    # 分块大小：根据模型上下文窗口调整，1.5b 模型建议不要太大,下面参数修改后重新执行ingest.py
+    CHUNK_SIZE: int = 400  #Gemini建议改小
     # 重叠部分：保持上下文连贯性
-    CHUNK_OVERLAP: int = 50
+    CHUNK_OVERLAP: int = 80 # Gemini建议给多点提示信息
     # 检索返回数量
     TOP_K: int = 3
 

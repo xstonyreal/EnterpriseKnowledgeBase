@@ -49,14 +49,17 @@ def get_chat_response(query: str):
         )
         retriever = vector_db.as_retriever(search_kwargs={"k": settings.TOP_K})
 
-        # 2. Prompt (适配 Qwen-0.5b)
-        template = """你是一个专业的助手。请仅根据以下背景信息回答。
+        # 2. Prompt (适配 Qwen-1.5b)
+        #由于引入qwen 1.5b，已经具备一定的智力，提示词进行优化
+        template = """你是一个专业的外部顾问和企业助手。请结合背景信息和你的知识回答。
+1.如果背景信息中没有相关内容，请结合你自身的知识储备给出准确回答。
+2.只有当你完全不确定且背景也未提及时，才说不知道。
+3.直接给出回答，不要啰嗦
 背景信息：
 {context}
 
 用户问题：{question}
-
-如果背景中没有，请说不知道。直接给出回答，不要啰嗦。
+。
 回答："""
         prompt = ChatPromptTemplate.from_template(template)
 
