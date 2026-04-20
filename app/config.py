@@ -6,7 +6,7 @@ import os  # 1. 引入 os 模块
 
 class Settings(BaseSettings):
     # --- 项目基础 ---
-    PROJECT_NAME: str = "EnterpriseKnowledgeBase"
+    PROJECT_NAME: str = "Matrix Intelligence"
 
     # --- 模型服务配置 ---
     # Ollama 地址 (兼容 OpenAI 格式)
@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     # --- 核心模型选择 ---
     LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
+
+    # ==========================================
+    # 🛡️ 本地 LLM 性能与安全参数 (新增)
+    # ==========================================
+    # 1. 温度设置：0.1 确保保险业务回复的严谨性，防止幻觉
+    LLM_TEMPERATURE: float = 0.1
+    # 2. 上下文窗口：锁定为 4096，防止 1.5b 模型因 Context 过载导致 10054 错误
+    LLM_NUM_CTX: int = 4096
 
     # --- 数据存储路径 ---
     # 1. 获取当前 config.py 文件所在的目录 (即 .../EnterpriseKnowledgeBase/app)
@@ -46,6 +54,17 @@ class Settings(BaseSettings):
     # --- Pydantic 设置 ---
     # env_file=".env" 告诉它去读根目录下的 .env 文件
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # ==========================================
+    # ⚡ Matrix 负载与并发引擎配置 (核心注入)
+    # ==========================================
+    # --- [任务 B：负载与并发配置] ---
+    # 批次大小：决定了 Embedding 过程中一次性送入显存的文本量。
+    # 4G 显存建议 32-40，8G+ 显存可尝试 64-128。
+    INGEST_BATCH_SIZE: int = 40
+    # 并发线程数：决定了同时解析 PDF/Word 的数量。
+    # 针对 I/O 密集型任务，建议设为 CPU 核心数的 1/2 或直接固定为 4。
+    INGEST_MAX_WORKERS: int = 4
 
 
 # 实例化配置，供其他模块直接导入使用

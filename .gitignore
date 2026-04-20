@@ -1,4 +1,4 @@
-# 忽略 Python 缓存
+# gitignore 忽略 Python 缓存
 __pycache__/
 *.py[cod]
 *$py.class
