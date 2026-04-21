@@ -52,16 +52,26 @@ def process_file_to_docs(file_path: str) -> List[Document]:
         # 1. 动态选择加载器
         if filename.lower().endswith(".pdf"):
             loader = PyPDFLoader(file_path)
+
         elif filename.lower().endswith(".txt"):
-            try:
-                loader = TextLoader(file_path, encoding="utf-8")
-            except UnicodeDecodeError:
-                loader = TextLoader(file_path, encoding="gbk")
+            # --- [只改这里：增强初始化参数，不改变执行流] ---
+            # 开启自动探测，如果失败则在加载阶段抛出异常，由下方的逻辑捕获
+            loader = TextLoader(file_path, encoding="utf-8", autodetect_encoding=True)
+
         else:
             loader = UnstructuredFileLoader(file_path)
 
-        # 2. 执行加载
-        raw_docs = loader.load()
+        # 2. 执行加载，这里引入了新的解码方式
+        try:
+            raw_docs = loader.load()
+        except Exception as e:
+            # 如果 utf-8/自动探测 彻底跪了，最后尝试一次 latin-1 暴力破解
+            if filename.lower().endswith(".txt"):
+                logger.warning(f"⚠️ [编码最终尝试] {filename} 切换至 latin-1")
+                loader = TextLoader(file_path, encoding="latin-1")
+                raw_docs = loader.load()
+            else:
+                raise e
 
         # 3. 注入 Metadata 契约
         for doc in raw_docs:

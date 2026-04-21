@@ -36,9 +36,13 @@
 核心功能：基于 Streamlit 最新规范，引入 “物理预检”拦截器。启动时仅做磁盘探测（懒加载），将重度计算权交给用户。具备资产审计看板与像素级溯源能力。
 
 🌟 核心诱人品质 (Key Features)
+
 🚀 动态感应同步：管理员只需管理文件夹，剩下的交给哨兵。零维护成本，即存即用。
+
 🧼 洁净重塑能力：支持一键触发“认知大清洗”，确保检索空间的绝对纯净与审计一致性。
+
 🔒 物理安全契约：将业务域直接映射为磁盘子目录。这种“物理即权限”的设计，是对企业数据主权最硬核的保护。
+
 🎓 极速决策洞察：管理层通过“全域视图”可瞬间发现跨部门政策冲突，将沉睡的 PDF 转化为流动的管理红利。
 
 🧩 设计理念 
@@ -51,7 +55,7 @@
 **1. 逻辑安全：异常脱水协议 (Exception Dehydration)**
 * 所在层级：全层级（主要在 Core 与 Pipeline）
 * 规范内容：禁止生成器或延迟任务直接引用原始异常对象 e。
-* 工程目的：规避你刚才遇到的 NameError。通过“捕获即快照”，确保在长链路、流式输出中，错误信息永远是线程安全且生命周期完整的。
+* 工程目的：规避 NameError。通过“捕获即快照”，确保在长链路、流式输出中，错误信息永远是线程安全且生命周期完整的。
 
 **2. 数据安全：物理域隔离 (Physical Domain Isolation)**
 * 所在层级：Core (内核层)
@@ -84,40 +88,81 @@
 📂 目录结构说明
 ```text
 EnterpriseKnowledgeBase/
-├── .env                  # 环境变量（API 密钥、模型名称、路径常量）
-├── main.py               # 程序入口（启动 FastAPI 服务）
-├── app.py                # 管理后台（Streamlit UI：上传、管理、对话）
-├── data/                 # 数据持久化层
-│   ├── uploads/          # 原始文档库（支持多级目录，如：行政、财务、技术）
-│   └── vector_db/        # 向量数据库（index.faiss 存储地）
-└── app/                  # 核心源代码
-    ├── api/              # 接口层：定义 HTTP 路由与会话管理
-    ├── core/             # 大脑层：RAG 执行逻辑、记忆管家、提示词管理
-    ├── models/           # 模型层：封装 LLM 与 Embedding 对接逻辑
-    ├── services/        # 【服务层】：封装入库与监听的高层业务逻辑
-    ├── storage/          # 存储层：向量库加载与检索操作
-    └── pipeline/         # 流水线：Loader 加载、增量入库、自动监听(Watcher)
+├── .env                     # 【核心配置】隔离敏感信息（API Key/模型版本/数据库地址）
+├── .gitignore               # 【资产过滤】防止将缓存、索引及虚拟环境推送到 Git
+├── plan.md                  # 【研发路线】记录 Sprint 计划、待办事项 (Backlog) 与 Bug 修复进度
+├── Architecture Contract.md  # 【开发规约】约束代码风格、层级调用逻辑与模块职责边界
+├── main.py                  # 【入口 A】后端 CLI 交互中心，用于本地测试与维护
+├── app_ui.py                # 【入口 B】Streamlit 全栈 UI，2026 风格业务操作台
+├── requirements.txt         # 【环境依赖】项目运行所需的 Python 库锁本
+│
+├── data/                    # 【数据资产层】
+│   ├── uploads/             # [输入] 原始业务文档，支持按部门/业务线创建子文件夹
+│   └── vector_db/           # [输出] 持久化 FAISS 语义索引，支持“秒级加载”
+│
+└── app/                     # 【逻辑心脏层】
+    ├── __init__.py          # 模块导出声明
+    ├── config.py            # 全局配置单例：基于 Pydantic 的类型安全配置管理
+    │
+    ├── api/                 # 【接口层】基于 FastAPI 的分布式扩展预留
+    │   ├── chat.py          # 对话状态管理、会话持久化逻辑
+    │   └── endpoints.py     # 外部 API 路由分发中心
+    │
+    ├── core/                # 【引擎层】RAG 系统的核心大脑
+    │   ├── engine.py        # 调度核心：负责检索、上下文组装与 LLM 推理联动
+    │   ├── logger.py        # 审计系统：全局结构化日志记录与错误追踪
+    │   └── prompts.py       # 提示词库：多场景保险业务专家级 Prompt 模板
+    │
+    ├── models/              # 【模型层】异构计算适配
+    │   ├── llm.py           # 本地认知引擎封装 (Ollama/Qwen)
+    │   └── embeddings.py    # 向量化模型封装 (Nomic/HuggingFace)
+    │
+    ├── pipeline/            # 【流水线层】非结构化数据治理
+    │   ├── ingest.py        # 数据分片 (Chunking) 与向量入库核心原子操作
+    │   ├── loader.py        # 多模态适配器：PDF、Word、TXT、Markdown 的解析读取
+    │   └── watcher.py       # 文件探测逻辑：获取目录结构、元数据提取
+    │
+    ├── services/            # 【服务层】业务逻辑聚合
+    │   ├── ingest_service.py # 调度中枢：处理重构、并发入库与单例生命周期管理
+    │   └── watcher_service.py# 异步服务：目录变更的监听与热挂载调度
+    │
+    ├── storage/             # 【存储适配层】
+    │   └── vector_db.py     # 向量数据库驱动：执行语义搜索与 Metadata 过滤
+    │
+    └── utils/               # 【工具集】通用逻辑复用
+        └── __init__.py      # 文件哈希、时间转换等独立工具函数
 
 ```
+提示：详细的开发规范请参考项目根目录下的 [Architecture Contract.md]
+
 🚀 快速上手指南
-1.环境准备
-* 操作系统: Windows 10/11
-* 运行环境: Python 3.9+
-* 核心依赖: 已安装 Ollama 并拉取模型：
-   ollama pull qwen2.5:1.5b
-   ollama pull nomic-embed-text
-2.安装步骤
-# 克隆/下载项目至本地
-cd EnterpriseKnowledgeBase
 
-# 创建并激活虚拟环境
-python -m venv .venv
-.venv\Scripts\activate
+****1.环境准备****
 
-# 安装依赖
-pip install -r requirements.txt
+操作系统: Windows 10/11
 
-3. 运行应用
+运行环境: Python 3.9+
+
+核心依赖: 已安装 Ollama 并拉取模型：
+
+       ollama pull qwen2.5:1.5b
+
+       ollama pull nomic-embed-text
+
+****2.安装步骤****
+
+    克隆/下载项目至本地
+    cd EnterpriseKnowledgeBase
+
+    创建并激活虚拟环境
+    python -m venv .venv
+    .venv\Scripts\activate
+
+    安装依赖
+    pip install -r requirements.txt
+
+****3. 运行应用****
+
 你可以通过以下命令启动集成管理后台：
 streamlit run app.py
 
