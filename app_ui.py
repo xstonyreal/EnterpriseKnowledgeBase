@@ -43,7 +43,7 @@ def get_dynamic_domains():
 # --- [冷热启动拦截器] ---
 # 目的：防止启动时因磁盘无索引而触发耗时的“全量重塑”动作
 # 无论磁盘文件怎么变，启动时我们只尝试加载 index.faiss，只要索引存在，就正常加载
-db_index_path = os.path.join(settings.CHROMA_PERSIST_DIR, "index.faiss")
+db_index_path = os.path.join(settings.VECTOR_DB_DIR, "index.faiss")
 index_exists = os.path.exists(db_index_path)
 
 # 初始化引擎：只有在索引物理存在时，才进行热加载
@@ -207,9 +207,9 @@ with col_history:
 
     # --- [新增逻辑]：为了判断状态，先读取指纹快照 ---
     manifest_data = get_saved_manifest()
-    if os.path.exists(os.path.join(settings.CHROMA_PERSIST_DIR, "manifest.json")):
+    if os.path.exists(os.path.join(settings.VECTOR_DB_DIR, "manifest.json")):
         try:
-            with open(os.path.join(settings.CHROMA_PERSIST_DIR, "manifest.json"), "r", encoding="utf-8") as f:
+            with open(os.path.join(settings.VECTOR_DB_DIR, "manifest.json"), "r", encoding="utf-8") as f:
                 manifest_data = json.load(f)
         except Exception:
             manifest_data = {}

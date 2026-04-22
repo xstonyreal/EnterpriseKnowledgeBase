@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # --- 数据存储路径 ---
     # 4. 这里直接使用上面算好的绝对路径
     # 注意：这里仍然保留 : str 类型注解
-    CHROMA_PERSIST_DIR: str = os.path.join(DATA_DIR, "vector_db")
+    VECTOR_DB_DIR: str = os.path.join(DATA_DIR, "vector_db")
     DATA_UPLOAD_DIR: str = os.path.join(DATA_DIR, "uploads")
 
     # ==========================================

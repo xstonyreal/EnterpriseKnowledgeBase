@@ -12,6 +12,11 @@ from langchain_core.documents import Document
 from app.config import settings
 from app.core.logger import logger
 
+# --- 切片器实例化外移，减少重复开销 ---
+_SPLITTER = RecursiveCharacterTextSplitter(
+    chunk_size=settings.CHUNK_SIZE,
+    chunk_overlap=settings.CHUNK_OVERLAP
+)
 
 def list_all_files(directory: str) -> List[str]:
     """
@@ -19,7 +24,6 @@ def list_all_files(directory: str) -> List[str]:
     职责：仅负责物理扫描，为多线程提供任务清单。
     """
     file_list = []
-    logger.info(f"📂 启动深度扫描模式: {directory}")
 
     if not os.path.exists(directory):
         logger.error(f"❌ 根目录不存在: {directory}")
@@ -43,6 +47,9 @@ def process_file_to_docs(file_path: str) -> List[Document]:
     """
     filename = os.path.basename(file_path)
     base_directory = settings.DATA_UPLOAD_DIR
+
+    # --- 优化点 1：时间戳一次性获取，供所有 chunk 复用 ---
+    ingest_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 继承原有的业务域 (Domain) 计算逻辑
     rel_path = os.path.relpath(os.path.dirname(file_path), base_directory)
@@ -80,12 +87,7 @@ def process_file_to_docs(file_path: str) -> List[Document]:
             doc.metadata["ingest_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 4. 执行物理切片 (维持 context 连续性)
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.CHUNK_SIZE,
-            chunk_overlap=settings.CHUNK_OVERLAP
-        )
-
-        splits = text_splitter.split_documents(raw_docs)
+        splits = _SPLITTER.split_documents(raw_docs)
         logger.info(f"✅ [已标记 - {domain}] 加载成功: {filename} ({len(splits)} chunks)")
         return splits
 
