@@ -4,93 +4,101 @@ import os
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# 统一从 models 引入，保持单例
+# 统一从 models 引入单例
 from app.models.llm import llm
-# 注意：embeddings 在 initialize_knowledge_base 内部已处理，此处仅在 format 时可能用到
 from app.config import settings
 from app.core.logger import logger
-# 【契约对齐】：必须统一使用 service 层定义的单例加载器
+# 统一使用底座定义的服务
 from app.services.ingest_service import initialize_knowledge_base
 
 
 def format_docs_with_source(docs):
-    """格式化检索到的文档，保留 Matrix 分域标签"""
+    """
+    格式化检索到的文档：
+    为 Prompt 提供清晰的上下文边界，同时在 Metadata 中保留分域信息。
+    """
     parts = []
     for i, doc in enumerate(docs):
-        source = doc.metadata.get("source", "未知来源")
+        # 仅保留文件名作为 Prompt 标识，减少 Token 浪费
+        source = os.path.basename(doc.metadata.get("source", "未知来源"))
         domain = doc.metadata.get("domain", "通用")
-        # 移除换行符，防止破坏 Prompt 结构
-        content = doc.page_content.replace('\n', ' ')
+        # 清洗换行符，防止破坏 Prompt 结构
+        content = doc.page_content.replace('\n', ' ').strip()
         parts.append(f"--- 资料项 {i + 1} [领域: {domain} | 来源: {source}] ---\n{content}")
     return "\n\n".join(parts)
 
 
-def get_chat_response(query: str, filter_domain: str = None) -> str:
-    """
-    【同步兼容层】：专为 main.py (CLI) 提供服务。
-    内部封装流式生成器并聚合结果。
-    """
-    stream_gen, sources = get_chat_response_stream(query, filter_domain)
-    full_response = "".join(list(stream_gen))
-    return full_response
-
-
 def get_chat_response_stream(query: str, filter_domain: str = None):
     """
-    Matrix Intelligence 重构版流式引擎：
-    :param query: 用户输入
-    :param filter_domain: UI 或逻辑层选中的业务域
+    Matrix Intelligence 增强版流式引擎：
+    1. 支持 FAISS 相似度得分回传。
+    2. 支持 UI 端的溯源预览卡片。
+    3. 严格分域隔离拦截。
     """
-    # 【核心手术位】：弃用本地 get_vector_db，改用底座统一初始化服务
+    # 初始化/获取底座单例
     db = initialize_knowledge_base()
 
     if db is None:
-        def err_gen(): yield "❌ Matrix 底座未就绪，请检查 data/uploads 是否有资产并执行同步。"
+        def err_gen(): yield "❌ Matrix 底座未就绪，请先执行资产同步。"
 
         return err_gen(), []
 
     query_l = query.lower().strip()
 
-    # 1. 🛡️ 极简拦截：保持原有逻辑
+    # 1. 极简社交拦截
     pure_greetings = ["hello", "hi", "你好", "哈喽", "在吗", "嗨", "早上好", "下午好"]
     if query_l in pure_greetings:
         def greeting_gen():
-            yield f"您好！我是您的智慧助手。当前已锁定业务域：`{filter_domain or '全域'}`。请键入您的业务指令。"
+            yield f"您好！我是您的业务智慧助手。当前业务域：`{filter_domain or '全域'}`。"
 
         return greeting_gen(), []
 
     try:
-        # 2. 🔍 精准检索：Matrix 分域隔离过滤
-        # 使用 settings.TOP_K 替代硬编码
+        # 2. 🔍 精准检索：获取文档 + 分数
         search_kwargs = {"k": settings.TOP_K}
 
-        # 注入过滤参数：FAISS 物理隔离检索
+        # 注入过滤：实现“文件夹即权限”的物理隔离
         if filter_domain and filter_domain not in ["核心决策层", "未分类资产", "全域"]:
             search_kwargs["filter"] = {"domain": filter_domain}
-            logger.info(f"🎯 [Matrix 精准模式] 检索范围锁定: {filter_domain}")
+            logger.info(f"🎯 [精准模式] 检索域锁定: {filter_domain}")
         else:
-            logger.info("🌐 [Matrix 全域模式] 执行跨域语义检索...")
+            logger.info("🌐 [全域模式] 执行跨域语义检索...")
 
-        docs = db.similarity_search(query, **search_kwargs)
+        # 【核心修改】：从单纯搜索改为“带分数搜索”
+        # docs_and_scores 格式: [(doc, score), ...]
+        docs_and_scores = db.similarity_search_with_score(query, **search_kwargs)
 
-        # 3. 🛑 零知识拦截
-        if not docs and filter_domain and filter_domain not in ["核心决策层", "全域"]:
-            def empty_gen():
-                yield f"⚠️ 在当前业务域 **[{filter_domain}]** 中未检索到相关资产。为防止幻觉，决策已拦截。请确认资产已同步至该目录。"
+        # 3. 🛑 零知识拦截与数据封装
+        if not docs_and_scores:
+            def empty_gen(): yield f"⚠️ 在业务域 **[{filter_domain}]** 中未发现相关线索，已拦截幻觉输出。"
 
             return empty_gen(), []
 
-        sources = list(set([doc.metadata.get("source", "未知来源") for doc in docs]))
+        # 【契约重构】：封装 sources 字典列表，供 UI 渲染增强卡片
+        sources = []
+        seen_sources = set()
+        for doc, score in docs_and_scores:
+            src_path = doc.metadata.get("source", "未知来源")
+            # 记录来源：去重显示，但保留前 N 个最相关的片段摘要
+            if src_path not in seen_sources or len(sources) < 3:
+                sources.append({
+                    "source": src_path,
+                    "score": float(score),  # FAISS 返回 L2 距离
+                    "content": doc.page_content.strip()[:150]  # 截取 150 字预览
+                })
+                seen_sources.add(src_path)
+
+        # 4. 🧠 注入上下文并生成 Prompt
+        docs = [d[0] for d in docs_and_scores]  # 提取 Document 对象供格式化
         context_text = format_docs_with_source(docs)
 
-        # 4. 🧠 Prompt：Matrix 人设维持
-        template = """你是一个专业的保险业务智慧助手，隶属于 Matrix Intelligence 智能底座。
+        template = """你是一个专业的智慧助手，隶属于 Matrix Intelligence 智能底座。
 当前检索域：{domain_info}
 
-【回答优先级指南】
-1. **优先库内匹配**：如果[背景信息]中有直接相关的条款，请严谨回答。
-2. **拒绝跨域猜测**：如果背景信息中没有答案，请诚实告知“无法根据现有底座资产给出建议”。
-3. **专业人设**：维持保险助手的逻辑性，不编造。
+【回答规则】
+1. **基于事实**：仅使用[背景信息]中的内容回答。
+2. **严谨溯源**：如果引用了资料，请在回答中尽量保持客观。
+3. **诚实原则**：如果背景信息不足，直接回答“抱歉，底座中暂无相关业务记录”。
 
 [背景信息]:
 {context}
@@ -101,12 +109,10 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
 回答："""
 
         prompt_text = ChatPromptTemplate.from_template(template)
-        # 注意：此处 llm 已从 models.llm 导入
         chain = prompt_text | llm | StrOutputParser()
 
         def stream_generator():
             domain_info = filter_domain if filter_domain else "全域开放"
-            # 使用 chain.stream 充分发挥 Ollama 的流式特性
             for chunk in chain.stream({
                 "context": context_text,
                 "question": query,
@@ -117,10 +123,16 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
         return stream_generator(), sources
 
     except Exception as e:
-        error_info = str(e)
-        logger.error(f"❌ Matrix 认知引擎执行异常: {error_info}")
+        logger.error(f"❌ 引擎执行异常: {str(e)}", exc_info=True)
 
         def err_gen():
-            yield f"❌ 抱歉，Matrix 逻辑链路出现震荡: {error_info}"
+            yield f"❌ 链路震荡: {str(e)}"
 
         return err_gen(), []
+
+
+def get_chat_response(query: str, filter_domain: str = None) -> str:
+    """CLI/同步兼容层"""
+    stream_gen, sources = get_chat_response_stream(query, filter_domain)
+    full_response = "".join(list(stream_gen))
+    return full_response

@@ -17,7 +17,7 @@ except ImportError:
 
 
 class IngestHandler(FileSystemEventHandler):
-    """监听文件创建和修改事件"""
+    """监听文件生命周期事件（创建、修改、删除）"""
 
     def __init__(self):
         self.last_run = 0
@@ -25,33 +25,42 @@ class IngestHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if not event.is_directory:
-            self._trigger(event.src_path)
+            self._trigger(event.src_path, "变动")
 
     def on_created(self, event):
         if not event.is_directory:
-            self._trigger(event.src_path)
+            self._trigger(event.src_path, "新增")
 
-    def _trigger(self, file_path):
+    def on_deleted(self, event):
+        if not event.is_directory:
+            self._trigger(event.src_path,"移除")
+
+    def _trigger(self, file_path, action_type):
         # 1.过滤逻辑
-        if os.path.basename(file_path).startswith(('.', '~', 'tmp')):
+        """
+        统一触发逻辑 (Single Trigger Entry)
+        :param file_path: 触发事件的文件路径
+        :param action_type: 事件语义标签 [新增/变动/移除]
+        """
+        file_name = os.path.basename(file_path)
+        # 1. 静态过滤
+        if file_name.startswith(('.', '~', 'tmp')) or file_name.endswith('.tmp'):
             return
 
-        # 2. 冷却时间检查
+        # 2. 冷却时间检查 (Debounce)
         if time.time() - self.last_run < self.cooldown:
             return
 
-        # 3. 保留核心感知和提醒：
-        logger.info(f"✨ 监测到文件变动: {os.path.basename(file_path)}")
+        # 3. 业务感知回响
+        logger.info(f"✨ [哨兵感知] 资产入口发生{action_type}: {file_name}")
 
-        # 缓冲 2 秒确保文件完整写入磁盘
-        time.sleep(2)
+        # 4. 稳态等待：只有新增/变动需要等待 IO，移除直接通过
+        if action_type != "移除":
+            time.sleep(2)
 
+        logger.info(f"📡 [哨兵] 已捕捉资产{action_type}，待用户手动触发认知同步。")
 
-        # 哨兵只提提醒，不执行全量切片入库
-        # 停滞全量入库 ingest_documents()
-        logger.info("📡 [哨兵] 已捕捉资产变动，待用户手动触发认知同步。")
-
-        # 4. 更新运行时间，防止短时间内重复打印
+        # 5. 更新运行快照
         self.last_run = time.time()
 
 def start_watcher():

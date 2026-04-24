@@ -158,3 +158,34 @@ feat: 完善RAG知识库指纹自省系统与负载保护机制
 2. 优化initialize_knowledge_base逻辑，实现差异化“秒开”
 3. 增加Token负载感知保护，解决大规模数据入库时的Ollama崩溃问题
 4. 重构ingest引擎，单例化切片器并提升并发效率
+
+
+🚀 Matrix Intelligence: Week Ending Summary (2026-04-24)
+1. 已完成的底層架構 (Completed Infrastructure)
+   12線程併發優化：成功壓榨 8 核 CPU 性能，設置 MAX_WORKERS=12，實現 I/O 與計算的極限平衡。
+   MD5 全生命週期管理 (指紋閉環)：
+       實現「新增-跳過-刪除」的自動同步邏輯。
+       確保數據庫指紋與物理文件 1:1 對齊，避免孤兒索引。
+   本地環境對齊：統一使用 .venv 虛擬環境與 PyCharm 映射路徑，修正 streamlit run 啟動路徑問題。
+2. 核心邏輯與 UI 創新 (Logic & UX Innovation)
+   置信區間 (Confidence Threshold)：
+       實裝 $L2$ 距離到百分比的轉換公式：$Score = \max(0, 1 - \frac{d}{1.5}) \times 100\%$。
+       產品哲學：引入「判斷權交還用戶」機制，提供「嚴謹/分析/探索」三檔模式，有效隔離 LLM 幻覺。
+   
+3. 下週工作計劃 (Next Week: Hybrid Search)
+   目標：引入 BM25 + 向量 的混合檢索（Hybrid Search）。
+   核心挑戰：RRF 融合算法調優、BM25 索引持久化、UI 滑動條與權重（Alpha）的動態關聯。
+   技術債：準備從 SQLite 遷移至 Supabase (feat-supabase 分支)。
+
+💾 Git 操作清單 (Checkout & Push)
+### 1. 檢查狀態
+git status
+
+### 2. 暫存變更
+git add .
+
+### 3. 提交（使用我們總結的精簡版標題）
+git commit -m "feat: implement 12-thread concurrency, MD5 fingerprint loop & confidence threshold logic"
+
+### 4. 推送到開發分支
+git push origin dev

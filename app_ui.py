@@ -179,8 +179,32 @@ with col_chat:
                 response_placeholder.markdown(full_response)
 
                 if sources:
-                    with st.expander("🎓 认知溯源 (Provenance)", expanded=True):
-                        for src in sources: st.info(f"📄 来源资产：`{src}`")
+                    with st.expander("🎓 認知溯源 (Matrix Provenance)", expanded=True):
+                        # 這裡假設後台傳回來的 sources 已經升級為 Dict 列表
+                        # 格式示例: [{"source": "xxx.pdf", "score": 0.12, "content": "..."}]
+
+                        cols = st.columns(len(sources) if len(sources) > 0 else 1)
+                        for idx, doc_info in enumerate(sources):
+                            # 兼容性處理：如果後台還沒改好，依然支持純字符串
+                            is_dict = isinstance(doc_info, dict)
+                            src_name = doc_info.get("source", "未知來源") if is_dict else doc_info
+                            score = doc_info.get("score", 0.0) if is_dict else 0.0
+                            content = doc_info.get("content", "") if is_dict else ""
+
+                            with cols[idx % len(cols)]:
+                                # 計算匹配百分比 (FAISS L2 距離越小越好，這裡做個視覺轉換)
+                                display_score = max(0, int((1 - score) * 100))
+
+                                st.markdown(f"""
+                                                <div style="padding:10px; border-radius:5px; border-left:5px solid #2ecc71; background-color:rgba(46, 204, 113, 0.1); margin-bottom:10px">
+                                                    <div style="font-size:0.8rem; font-weight:bold; color:#27ae60;">MATCH: {display_score}%</div>
+                                                    <div style="font-size:0.9rem; margin-top:5px;">📄 {os.path.basename(src_name)}</div>
+                                                </div>
+                                                """, unsafe_allow_html=True)
+
+                                if content:
+                                    st.caption(f"📝 關鍵片段預覽:")
+                                    st.code(f"...{content[:100]}...", wrap_lines=True)
 
             st.session_state.messages.append({
                 "role": "assistant",

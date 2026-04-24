@@ -9,6 +9,10 @@ def setup_logger():
     logger = logging.getLogger(settings.PROJECT_NAME)
     logger.setLevel(logging.DEBUG)
 
+    # 彻底禁用日志向父级（Root Logger）传播
+    # 这样消息就只由我们自己定义的 console_handler 打印，不会被系统再打一遍
+    logger.propagate = False
+
     # 防止在 Jupyter 或其他环境中重复添加 Handler 导致重复日志
     if not logger.handlers:
         # 创建控制台处理器
