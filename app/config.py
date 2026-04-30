@@ -1,71 +1,125 @@
 # app/config.py
+
+import os
+from typing import ClassVar, Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, ClassVar  # 1. 在这里引入 ClassVar
-import os  # 1. 引入 os 模块
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
-    # --- 项目基础 ---
+    # ==========================================
+    # 項目基礎
+    # ==========================================
     PROJECT_NAME: str = "Matrix Intelligence"
 
-    # --- 模型服务配置 ---
-    # Ollama 地址 (兼容 OpenAI 格式)
+    # ==========================================
+    # 模型服務配置
+    # ==========================================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    # Ollama 不需要 Key，但 LangChain 要求必须有
     OPENAI_API_KEY: str = "ollama"
 
-    # --- 核心模型选择 ---
+    # ==========================================
+    # 核心模型選擇
+    # ==========================================
     LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # ==========================================
-    # 🛡️ 本地 LLM 性能与安全参数 (新增)
+    # 🛡️ LLM 推理與安全參數
     # ==========================================
-    # 1. 温度设置：0.1 确保保险业务回复的严谨性，防止幻觉
     LLM_TEMPERATURE: float = 0.1
-    # 2. 上下文窗口：锁定为 4096，防止 1.5b 模型因 Context 过载导致 10054 错误
     LLM_NUM_CTX: int = 4096
+    LLM_TIMEOUT: int = 120
 
-    # --- 数据存储路径 ---
-    # 1. 获取当前 config.py 文件所在的目录 (即 .../EnterpriseKnowledgeBase/app)
+    # ==========================================
+    # 📂 數據存儲路徑（自動計算絕對路徑）
+    # ==========================================
     BASE_DIR: ClassVar[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # 3. 拼接出 data 目录的绝对路径
     DATA_DIR: ClassVar[str] = os.path.join(BASE_DIR, "data")
 
-    # --- 数据存储路径 ---
-    # 4. 这里直接使用上面算好的绝对路径
-    # 注意：这里仍然保留 : str 类型注解
     VECTOR_DB_DIR: str = os.path.join(DATA_DIR, "vector_db")
     DATA_UPLOAD_DIR: str = os.path.join(DATA_DIR, "uploads")
+    BM25_DB_DIR: str = os.path.join(DATA_DIR, "bm25_db")
 
     # ==========================================
-    # 📝 文本处理参数 (RAG 核心参数)
+    # 📝 文本處理參數（RAG 核心）
     # ==========================================
-    # 分块大小：根据模型上下文窗口调整，1.5b 模型建议不要太大,下面参数修改后重新执行ingest.py
-    CHUNK_SIZE: int = 400  #Gemini建议改小
-    # 重叠部分：保持上下文连贯性
-    CHUNK_OVERLAP: int = 80 # Gemini建议给多点提示信息
-    # 检索返回数量
+    CHUNK_SIZE: int = 800
+    CHUNK_OVERLAP: int = 120
+
+    # ==========================================
+    # 🎯 混合檢索與 RRF 調參
+    # ==========================================
     TOP_K: int = 3
-
-    # 向量库集合名称
+    RETRIEVAL_OVERSIZE_RATIO: int = 3
+    RRF_K: int = 60
     VECTOR_DB_COLLECTION: str = "documents"
 
-    # --- Pydantic 设置 ---
-    # env_file=".env" 告诉它去读根目录下的 .env 文件
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
     # ==========================================
-    # ⚡ Matrix 负载与并发引擎配置 (核心注入)
+    # ⚡ 負載與併發控制
     # ==========================================
-    # --- [任务 B：负载与并发配置] ---
-    # 批次大小：决定了 Embedding 过程中一次性送入显存的文本量。
-    # 4G 显存建议 32-40，8G+ 显存可尝试 64-128。
-    INGEST_BATCH_SIZE: int = 40
-    # 并发线程数：决定了同时解析 PDF/Word 的数量。
-    # 针对 I/O 密集型任务，建议设为 CPU 核心数的 1/2 或直接固定为 4。
+    BATCH_SIZE: int = 32
     INGEST_MAX_WORKERS: int = 4
 
+    # ==========================================
+    # 📋 日誌配置
+    # ==========================================
+    LOG_LEVEL: str = "INFO"
 
-# 实例化配置，供其他模块直接导入使用
-settings = Settings()
+    # ==========================================
+    # 🔧 特殊域配置（預留，未來 UI 可配置）
+    # ==========================================
+    SPECIAL_DOMAINS: List[str] = ["全域", "核心决策层", "未分类资产"]
+
+    # ==========================================
+    # Pydantic 配置
+    # ==========================================
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    @field_validator("SPECIAL_DOMAINS", mode="before")
+    @classmethod
+    def parse_special_domains(cls, v):
+        """解析 .env 中的逗號分隔字符串"""
+        if isinstance(v, str):
+            return [d.strip() for d in v.split(",") if d.strip()]
+        return v
+
+    def model_post_init(self, __context) -> None:
+        """配置加載後校驗與初始化"""
+        self._validate_chunk_params()
+        self._ensure_directories()
+
+    def _validate_chunk_params(self) -> None:
+        """校驗分塊參數範圍"""
+        if not (400 <= self.CHUNK_SIZE <= 1200):
+            raise ValueError(f"CHUNK_SIZE 必須在 400-1200 範圍內，當前值: {self.CHUNK_SIZE}")
+        if self.CHUNK_OVERLAP >= self.CHUNK_SIZE:
+            raise ValueError(f"CHUNK_OVERLAP ({self.CHUNK_OVERLAP}) 必須小於 CHUNK_SIZE ({self.CHUNK_SIZE})")
+        if self.CHUNK_OVERLAP < 0:
+            raise ValueError(f"CHUNK_OVERLAP 不能為負數")
+
+    def _ensure_directories(self) -> None:
+        """確保必要目錄存在"""
+        for dir_path in [self.DATA_DIR, self.VECTOR_DB_DIR, self.DATA_UPLOAD_DIR, self.BM25_DB_DIR]:
+            os.makedirs(dir_path, exist_ok=True)
+
+
+# ==========================================
+# 全局單例
+# ==========================================
+_settings: Optional[Settings] = None
+
+
+def get_settings() -> Settings:
+    """獲取全局配置單例"""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+settings = get_settings()

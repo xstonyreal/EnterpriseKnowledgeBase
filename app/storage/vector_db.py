@@ -1,4 +1,4 @@
-# app/core/vector_db.py
+# app/storage/vector_db.py
 import os
 from langchain_community.vectorstores import FAISS
 from app.config import settings
@@ -10,7 +10,7 @@ def load_vector_db():
     """
     加载本地 FAISS 索引
     """
-    db_path = os.path.join(settings.CHROMA_PERSIST_DIR, "faiss_index")
+    db_path = os.path.join(settings.VECTOR_DB_DIR, "faiss_index")
 
     if not os.path.exists(db_path):
         logger.warning(f"⚠️ 向量库不存在: {db_path}")

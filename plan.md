@@ -189,3 +189,65 @@ git commit -m "feat: implement 12-thread concurrency, MD5 fingerprint loop & con
 
 ### 4. 推送到開發分支
 git push origin dev
+
+ 
+
+---
+
+### 📅 Matrix M3 階段工作計劃：RRF 融合檢索實裝
+
+#### 第一階段：檢索器（Retriever）的最小化注入
+* **任務**：在 `search_service.py` 中新增一個 `BM25Retriever` 類（或方法），負責從上週生成的 `bm25.pkl` 中讀取數據。
+* **比對點**：確認 `.pkl` 文件路徑是否正確加載，以及 `jieba` 分詞是否與 Ingest 階段保持一致。
+
+#### 第二階段：RRF (Reciprocal Rank Fusion) 算法實裝
+* **任務**：編寫核心融合邏輯。這個算法不涉及複雜數學，它只是一個「排位賽」公式。
+    * 公式原理：$Score = \sum_{d \in D} \frac{1}{k + r(d)}$
+* **比對點**：檢查在相同提問下，向量路徑與關鍵字路徑分別返回的 Top 5 是否能正確合併。
+
+#### 第三階段：主查詢入口重構與測試
+* **任務**：修改 `ask` 或 `query` 主函數，將原本單一的 `vector_search` 替換為 `hybrid_search`。
+* **比對點**：使用你上週提到的「條款編號」或「生僻術語」進行壓力測試，肉眼觀察「聰明程度」的提升。
+
+---
+📝## 📝 2026-04-30 代码审阅完成
+
+### 已完成审阅的核心文件（18个）
+
+| 序号 | 文件 | 状态 |
+|------|------|------|
+| 1 | .env | ✅ |
+| 2 | requirements.txt | ✅ |
+| 3 | app/config.py | ✅ |
+| 4 | app/core/exceptions.py | ✅ |
+| 5 | app/core/logger.py | ✅ |
+| 6 | app/core/engine.py | ✅ |
+| 7 | app/models/embeddings.py | ✅ |
+| 8 | app/models/llm.py | ✅ |
+| 9 | app/storage/vector_db.py | ✅ |
+| 10 | app/pipeline/loader.py | ✅ |
+| 11 | app/pipeline/ingest.py | ✅ |
+| 12 | app/pipeline/watcher.py | ✅ |
+| 13 | app/services/ingest_service.py | ✅ |
+| 14 | app/services/watcher_service.py | ✅ |
+| 15 | app/services/search_service.py | ✅ |
+| 16 | app/utils/hash_utils.py | ✅ |
+| 17 | app_ui.py | ✅ |
+| 18 | main.py | ✅ |
+
+### 主要成果
+
+- 统一异常脱水平台 (exceptions.py)
+- 混合检索引擎 (FAISS + BM25 + RRF)
+- 完善哨兵监控与服务层架构
+- 修复配置文件路径计算逻辑
+- Streamlit UI 冷热启动拦截器
+
+### 核心修改摘要
+
+1. config.py: 新增 LOG_LEVEL 配置，完善路径自动计算
+2. logger.py: 支持从配置文件读取日志级别
+3. search_service.py: BM25 路径统一使用 settings，doc_id 改为 MD5 哈希
+4. watcher.py: 保留独立运行入口，哨兵仅记录变动不自动入库
+5. ingest_service.py: 删除 load_dotenv()，统一使用 settings
+6. main.py: 新增 --reindex 参数，支持 CLI 域过滤查询

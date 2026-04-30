@@ -3,10 +3,10 @@
 import os
 from langchain_ollama import ChatOllama
 from app.config import settings
-from app.core.logger import logger
+
 
 # ==========================================
-# 判断.env 文件是否存在
+# 判断.env 文件是否存在jn
 # ==========================================
 from app.core.logger import logger
 
@@ -40,7 +40,7 @@ def get_llm():
         base_url=settings.OLLAMA_BASE_URL,
         temperature=settings.LLM_TEMPERATURE,  # 建议从配置中读取
         num_ctx=settings.LLM_NUM_CTX,  # 👈 必须引用 settings，保持协议一致
-        timeout=120,  # 【关键】本地连接超时延长至 2分钟
+        timeout=settings.LLM_TIMEOUT,  # 【关键】本地连接超时延长至 2分钟
         # repeat_penalty=1.1,      # 可选：防止模型复读机
     )
 

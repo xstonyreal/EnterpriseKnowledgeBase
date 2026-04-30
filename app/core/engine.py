@@ -3,14 +3,18 @@
 import os
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document  # 新增：用於封裝混合檢索結果
 
 # 统一从 models 引入单例
 from app.models.llm import llm
 from app.config import settings
 from app.core.logger import logger
-# 统一使用底座定义的服务
-from app.services.ingest_service import initialize_knowledge_base
+# --- [M3 核心注入] ---
+# 引入我們剛剛建立的混合檢索服務
+from app.services.search_service import SearchService
 
+# 實例化搜尋服務單例
+search_svc = SearchService()
 
 def format_docs_with_source(docs):
     """
@@ -30,18 +34,11 @@ def format_docs_with_source(docs):
 
 def get_chat_response_stream(query: str, filter_domain: str = None):
     """
-    Matrix Intelligence 增强版流式引擎：
-    1. 支持 FAISS 相似度得分回传。
-    2. 支持 UI 端的溯源预览卡片。
-    3. 严格分域隔离拦截。
+    Matrix Intelligence 混合檢索增強版流式引擎：
+    1. 實裝 RRF 混合檢索 (FAISS + BM25)。
+    2. 支持 UI 端的溯源預覽卡片。
+    3. 嚴格執行「文件夾即權限」的業務域過濾。
     """
-    # 初始化/获取底座单例
-    db = initialize_knowledge_base()
-
-    if db is None:
-        def err_gen(): yield "❌ Matrix 底座未就绪，请先执行资产同步。"
-
-        return err_gen(), []
 
     query_l = query.lower().strip()
 
@@ -54,43 +51,50 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
         return greeting_gen(), []
 
     try:
-        # 2. 🔍 精准检索：获取文档 + 分数
-        search_kwargs = {"k": settings.TOP_K}
+        # 2. 🔍 [核心變動]：執行混合檢索，獲取 RRF 融合結果
+        # top_n 取 settings.TOP_K * 2，為後續的 Domain 過濾預留空間
+        raw_results = search_svc.hybrid_search(query, top_n=settings.TOP_K * 2)
 
-        # 注入过滤：实现“文件夹即权限”的物理隔离
-        if filter_domain and filter_domain not in ["核心决策层", "未分类资产", "全域"]:
-            search_kwargs["filter"] = {"domain": filter_domain}
-            logger.info(f"🎯 [精准模式] 检索域锁定: {filter_domain}")
-        else:
-            logger.info("🌐 [全域模式] 执行跨域语义检索...")
-
-        # 【核心修改】：从单纯搜索改为“带分数搜索”
-        # docs_and_scores 格式: [(doc, score), ...]
-        docs_and_scores = db.similarity_search_with_score(query, **search_kwargs)
-
-        # 3. 🛑 零知识拦截与数据封装
-        if not docs_and_scores:
-            def empty_gen(): yield f"⚠️ 在业务域 **[{filter_domain}]** 中未发现相关线索，已拦截幻觉输出。"
+        if not raw_results:
+            def empty_gen(): yield f"⚠️ 在業務域 **[{filter_domain}]** 中未發現相關線索，已攔截幻覺輸出。"
 
             return empty_gen(), []
 
-        # 【契约重构】：封装 sources 字典列表，供 UI 渲染增强卡片
+        # 3. 🛡️ 業務域隔離過濾
         sources = []
-        seen_sources = set()
-        for doc, score in docs_and_scores:
-            src_path = doc.metadata.get("source", "未知来源")
-            # 记录来源：去重显示，但保留前 N 个最相关的片段摘要
-            if src_path not in seen_sources or len(sources) < 3:
+        filtered_docs = []
+
+        for res in raw_results:
+            content = res["content"]
+            metadata = res["metadata"]
+            score = res["score"]  # 注意：這是 RRF 分數
+            src_path = metadata.get("source", "未知來源")
+
+            # 從路徑解析業務域（與 ingest 邏輯一致）
+            # 假設路徑結構為 data/uploads/業務域/文件名
+            doc_domain = metadata.get("domain", "未分類資產")
+
+            # 邏輯攔截：匹配「全域」、「核心決策層」或指定的「filter_domain」
+            if not filter_domain or filter_domain in ["核心决策层", "未分类资产",
+                                                      "全域"] or filter_domain == doc_domain:
+                # 封裝 UI 溯源卡片數據
                 sources.append({
                     "source": src_path,
-                    "score": float(score),  # FAISS 返回 L2 距离
-                    "content": doc.page_content.strip()[:150]  # 截取 150 字预览
+                    "score": float(score),
+                    "content": content.strip()[:150]  # 截取預覽
                 })
-                seen_sources.add(src_path)
+                # 封裝 Document 對象供後續 format_docs_with_source 使用
+                filtered_docs.append(Document(page_content=content, metadata=metadata))
 
-        # 4. 🧠 注入上下文并生成 Prompt
-        docs = [d[0] for d in docs_and_scores]  # 提取 Document 对象供格式化
-        context_text = format_docs_with_source(docs)
+        # 二次檢查過濾後的結果
+        if not filtered_docs:
+            def empty_gen(): yield f"⚠️ 該關鍵詞在當前業務域 **[{filter_domain}]** 無匹配項。"
+
+            return empty_gen(), []
+
+        # 4. 🧠 注入上下文並生成 Prompt
+        # 取前 settings.TOP_K 個最相關的片段餵給 LLM
+        context_text = format_docs_with_source(filtered_docs[:settings.TOP_K])
 
         template = """你是一个专业的智慧助手，隶属于 Matrix Intelligence 智能底座。
 当前检索域：{domain_info}

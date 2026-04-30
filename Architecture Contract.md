@@ -55,7 +55,7 @@
 
     顶部导入 (Top-level)：仅限标准库（os, time）和核心配置（settings, logger）。
 
-    局部导入 (Local import)：凡是涉及具体业务逻辑、且容易引发循环依赖的跨层调用（如 Service 调用 Pipeline），必须放在函数内部进行延迟导入（Lazy Import）。
+    局部导入 (Local import)：凡是涉及具体业务逻辑、且容易引发循环依赖的跨层调用（如 Service 调用 Pipeline），必须放在函数内部进行延迟导入（Lazy Import）。禁止在文件頂部直接 from app.pipeline.ingest import ...
 **🛡️ 变更审计清单 (每次提交前自检)**
 [ ] Settings 类中 TOP_K 还在吗？
 
@@ -64,3 +64,5 @@
 [ ] .env 的物理文件是否还存在？
 
 [ ] 路径计算是否依然基于 BASE_DIR 的绝对路径？
+
+

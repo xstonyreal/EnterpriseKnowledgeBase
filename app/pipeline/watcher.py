@@ -10,10 +10,12 @@ from pathlib import Path
 from app.utils.hash_utils import calculate_file_hash # 引入指纹
 
 # 适配位置：从同包或完整路径导入
+# 保留導入（當前未使用，預留給未來自動觸發功能）
+# 適配兩種運行方式：正常啟動 或 直接運行腳本
 try:
-    from app.pipeline.ingest import ingest_documents
+    from app.pipeline.ingest import ingest_documents  # 完整項目路徑
 except ImportError:
-    from ingest import ingest_documents
+    from ingest import ingest_documents               # 腳本模式備份
 
 
 class IngestHandler(FileSystemEventHandler):
@@ -64,6 +66,7 @@ class IngestHandler(FileSystemEventHandler):
         self.last_run = time.time()
 
 def start_watcher():
+    """獨立運行哨兵（用於測試，生產環境請使用 watcher_service.py）"""
     watch_dir = settings.DATA_UPLOAD_DIR
     if not os.path.exists(watch_dir):
         os.makedirs(watch_dir, exist_ok=True)
@@ -103,5 +106,7 @@ def get_source_manifest(upload_dir: str) -> dict:
 # 获取指纹 ending
 #************************************
 
+
+# *******確保哨兵旨在本應用被調用一次**********
 if __name__ == "__main__":
     start_watcher()

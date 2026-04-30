@@ -1,94 +1,140 @@
 # main.py
 import os
 import sys
+import argparse
 from app.config import settings
-from app.core.engine import get_chat_response
+from app.core.engine import get_chat_response_stream
 from app.core.logger import logger
-
-# --- [架构升级：引入服务层] ---
-# 统一调用 Service，确保逻辑与网页版 100% 同步
 from app.services.ingest_service import initialize_knowledge_base
+from app.services.watcher_service import start_sentinel
 
 
-def main():
-    """
-    Matrix Intelligence - 核心指挥部 (CLI Mode)
-    基于分域隔离架构，实现全本地化 RAG 决策支持
-    """
-    # 清屏美化（可选）
-    # os.system('cls' if os.name == 'nt' else 'clear')
+def print_banner():
+    """打印啟動橫幅"""
+    print("=" * 60)
+    print(f"🧬 {settings.PROJECT_NAME} - 企業級分域隔離 RAG 底座")
+    print(f"📡 版本: 1.0 | 狀態: 生產就緒")
+    print(f"📂 知識域目錄: {settings.DATA_UPLOAD_DIR}")
+    print(f"🤖 認知引擎: {settings.LLM_MODEL}")
+    print("=" * 60)
+    print()
 
-    print("==================================================")
-    print(f"🧬 {settings.PROJECT_NAME} - 核心指挥部")
-    print(f"📡 架构版本: RAG-Matrix v1.0 | 状态: 生产就绪")
-    print(f"📂 知识域目录: {settings.DATA_UPLOAD_DIR}")
-    print("==================================================\n")
 
-    # ==========================================
-    # 1. 核心治理：底座初始化 (感知注入)
-    # ==========================================
-    # 逻辑依据：
-    # - 调用 initialize_knowledge_base 执行自省。
-    # - 优先热加载本地 FAISS 资产，无资产时自动启动多线程 Ingest。
+def cmd_reindex():
+    """手動重建索引（--reindex）"""
+    print("\n🔄 正在執行全量索引重建...")
+    print("⚠️  此操作將清空現有向量庫並重新處理所有文檔\n")
+
     try:
-        print("🛠️  正在执行知识空间自省与挂载...")
-        vectorstore = initialize_knowledge_base(force_rebuild=False)
-
-        if vectorstore is None:
-            print("⚠️  [底座预警] 当前知识空间为空。")
-            print(f"💡 请将保险业务文档放入: {settings.DATA_UPLOAD_DIR} 并重启系统。")
-            # CLI 模式下，空资产通常不退出，允许用户通过对话触发报错或空检索
+        vectorstore = initialize_knowledge_base(force_rebuild=True)
+        if vectorstore:
+            print("\n✅ 索引重建完成！")
         else:
-            print("✅ 语义向量空间已成功映射至内存 (Matrix Ready)。")
-
+            print("\n⚠️  重建完成，但未發現有效文檔")
     except Exception as e:
-        print(f"🚨 空间初始化失败: {e}")
-        logger.critical(f"系统启动中断: {str(e)}")
+        print(f"\n❌ 重建失敗: {e}")
+        logger.error(f"重建失敗: {str(e)}")
         sys.exit(1)
 
-    # ==========================================
-    # 2. 指令交互循环 (RAG Loop)
-    # ==========================================
-    print("\n💬 业务指令中心已开启 (输入 'exit' 退出):")
-    print(f"提示：系统运行于 {settings.LLM_MODEL} 引擎，具备分域隔离检索能力。")
+
+def cmd_chat():
+    """啟動 CLI 對話模式"""
+    print_banner()
+
+    # 初始化知識底座
+    print("🛠️  正在執行知識空間自省與掛載...")
+    try:
+        vectorstore = initialize_knowledge_base(force_rebuild=False, check_manifest=True)
+
+        if vectorstore is None:
+            print("⚠️  [底座預警] 當前知識空間為空。")
+            print(f"💡 請將文檔放入: {settings.DATA_UPLOAD_DIR}")
+            print("   或執行 `python main.py --reindex` 手動重建索引\n")
+        else:
+            print("✅ 語義向量空間已成功映射至內存\n")
+
+        # 啟動哨兵（後臺監控）
+        start_sentinel()
+        print("📡 哨兵已啟動，正在監控文件變動\n")
+
+    except Exception as e:
+        print(f"🚨 空間初始化失敗: {e}")
+        logger.critical(f"系統啟動中斷: {str(e)}")
+        sys.exit(1)
+
+    # 對話循環
+    print("💬 業務指令中心已開啟 (輸入 'exit' 退出):")
+    print(f"📌 提示：輸入 'domain:財務部 問題' 可指定業務域查詢\n")
 
     while True:
         try:
-            # 模拟交互终端
-            user_input = input("\n👤 业务指令 > ").strip()
+            user_input = input("\n👤 業務指令 > ").strip()
 
-            # 1. 退出指令处理
             if user_input.lower() in ['exit', 'quit', '退出', 'bye']:
-                print("\n👋 正在释放内存资产... 系统休眠。")
+                print("\n👋 正在釋放資源... 系統休眠。")
                 break
 
-            # 2. 空输入拦截
             if not user_input:
                 continue
 
-            # 3. 执行 RAG 认知合成
-            # get_chat_response 内部会调用封装好的检索链
-            print("🧠 正在检索关联语义簇并合成决策建议...")
-            answer = get_chat_response(user_input)
+            # 解析可選的域前綴
+            filter_domain = None
+            query_text = user_input
 
-            # 4. 响应输出
+            if user_input.startswith("domain:"):
+                parts = user_input.split(" ", 1)
+                if len(parts) == 2:
+                    domain_part = parts[0].replace("domain:", "")
+                    filter_domain = domain_part
+                    query_text = parts[1]
+                    print(f"🎯 檢索域: {filter_domain}")
+
+            print("🧠 正在檢索並合成決策建議...")
+
+            stream_gen, sources = get_chat_response_stream(query_text, filter_domain=filter_domain)
+
             print("-" * 50)
-            print(f"🤖 Matrix 决策建议: \n{answer}")
-            print("-" * 50)
+            full_response = ""
+            for chunk in stream_gen:
+                full_response += chunk
+                print(chunk, end="", flush=True)
+            print("\n" + "-" * 50)
+
+            # 顯示溯源信息
+            if sources:
+                print("\n📚 參考來源:")
+                for idx, s in enumerate(sources[:3]):
+                    src = s.get("source", "未知") if isinstance(s, dict) else s
+                    score = s.get("score", 0) if isinstance(s, dict) else 0
+                    print(f"   {idx + 1}. {os.path.basename(src)} (匹配度: {score:.2f})")
+                print()
 
         except KeyboardInterrupt:
-            print("\n\n⚠️  检测到强制中断，系统安全停机。")
+            print("\n\n⚠️  檢測到強制中斷，系統安全停機。")
             break
         except Exception as e:
-            print(f"❌ 认知合成异常: {e}")
-            logger.error(f"对话异常: {str(e)}")
+            print(f"❌ 認知合成異常: {e}")
+            logger.error(f"對話異常: {str(e)}")
 
 
-if __name__ == "__main__":
-    # 环境自检：确保项目根目录在系统路径中，根治导入报错
+def main():
+    """主入口"""
+    parser = argparse.ArgumentParser(description="Matrix Intelligence CLI")
+    parser.add_argument("--reindex", action="store_true", help="手動全量重建索引")
+    parser.add_argument("--chat", action="store_true", help="啟動對話模式")
+
+    args = parser.parse_args()
+
+    # 確保項目根目錄在路徑中
     root_path = os.path.dirname(os.path.abspath(__file__))
     if root_path not in sys.path:
         sys.path.append(root_path)
 
-    # 启动 Matrix 底座
+    if args.reindex:
+        cmd_reindex()
+    else:
+        cmd_chat()
+
+
+if __name__ == "__main__":
     main()

@@ -12,6 +12,11 @@ from langchain_core.documents import Document
 from app.config import settings
 from app.core.logger import logger
 
+# 增加office 文檔處理能力，放在函數内加載
+# import pandas as pd
+# from docx import Document as DocxDocument
+# from pptx import Presentation
+
 # --- 切片器实例化外移，减少重复开销 ---
 _SPLITTER = RecursiveCharacterTextSplitter(
     chunk_size=settings.CHUNK_SIZE,
@@ -42,16 +47,10 @@ def list_all_files(directory: str) -> List[str]:
 def process_file_to_docs(file_path: str) -> List[Document]:
     """
     【原子接口 2】：单文件并发处理器（Task B 核心）。
-    职责：读取、Metadata 注入、物理切片。
-    逻辑依据：保持线程安全，确保每一片 Document 都携带完整的业务标签。
     """
     filename = os.path.basename(file_path)
     base_directory = settings.DATA_UPLOAD_DIR
-
-    # --- 优化点 1：时间戳一次性获取，供所有 chunk 复用 ---
     ingest_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # 继承原有的业务域 (Domain) 计算逻辑
     rel_path = os.path.relpath(os.path.dirname(file_path), base_directory)
     domain = "未分类资产" if rel_path == "." else rel_path
 
@@ -59,34 +58,88 @@ def process_file_to_docs(file_path: str) -> List[Document]:
         # 1. 动态选择加载器
         if filename.lower().endswith(".pdf"):
             loader = PyPDFLoader(file_path)
-
+            raw_docs = loader.load()  # 保持原樣執行
         elif filename.lower().endswith(".txt"):
-            # --- [只改这里：增强初始化参数，不改变执行流] ---
-            # 开启自动探测，如果失败则在加载阶段抛出异常，由下方的逻辑捕获
-            loader = TextLoader(file_path, encoding="utf-8", autodetect_encoding=True)
+            # --- [修正：建立中文优先的编码探测逻辑] ---
+            # 放弃直接调用 autodetect_encoding，改为手动尝试中文编码链
+            raw_docs = []
+            encodings_to_try = ["GB2312","utf-8", "big5"]
+            success = False
 
+            for enc in encodings_to_try:
+                try:
+                    # 原地尝试加载，失败则捕获异常进入下一循环
+                    loader = TextLoader(file_path, encoding=enc)
+                    raw_docs = loader.load()
+                    success = True
+                    logger.info(f"📄 [編碼成功] {filename} 已使用 {enc} 讀取")
+                    break
+                except Exception:
+                    continue
+
+            if not success:
+                # 如果中文链全灭，最后报错拦截，绝不回退到 latin-1
+                raise ValueError(f"無法識別的文本編碼，請將文件轉為 UTF-8")
+
+        # ========== 新增：Word 文件支援 ==========
+        elif filename.lower().endswith(".docx"):
+            from docx import Document as DocxDocument
+            doc = DocxDocument(file_path)
+            full_text = []
+            for para in doc.paragraphs:
+                full_text.append(para.text)
+            content = "\n".join(full_text)
+            # 手動建立 Document 物件
+            raw_docs = [Document(page_content=content, metadata={"source": file_path})]
+            logger.info(f"📄 [Word] {filename} 讀取成功，共 {len(full_text)} 段落")
+
+        # ========== 新增：Excel 文件支援 ,當前暫緩處理==========
+        #elif filename.lower().endswith((".xlsx", ".xls")):
+        #    import pandas as pd
+        #    df = pd.read_excel(file_path, engine='openpyxl')
+        #    # 將 DataFrame 轉為文字
+        #    content = df.to_string()
+        #    from langchain_core.documents import Document
+        #    raw_docs = [Document(page_content=content, metadata={"source": file_path})]
+        #    logger.info(f"📄 [Excel] {filename} 讀取成功，共 {len(df)} 行")
+        # ========== 新增：Excel 文件支援 ,當前暫緩處理==========
+
+        # =============拒絕excel+++++++++++++++ #
+        elif filename.lower().endswith((".xlsx", ".xls")):
+            raise NotImplementedError(
+                f"Excel 文件 {filename} 當前處於實驗性支持階段，"
+                "存在解析穩定性問題。暫時請轉換為 CSV 或 TXT 格式後導入。"
+            )
+
+        # ========== 新增：PowerPoint 文件支援 ==========
+        elif filename.lower().endswith((".pptx", ".ppt")):
+            from pptx import Presentation
+            prs = Presentation(file_path)
+            full_text = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        full_text.append(shape.text)
+            content = "\n".join(full_text)
+            raw_docs = [Document(page_content=content, metadata={"source": file_path})]
+            logger.info(f"📄 [PowerPoint] {filename} 讀取成功，共 {len(full_text)} 個文本元素")
         else:
             loader = UnstructuredFileLoader(file_path)
-
-        # 2. 执行加载，这里引入了新的解码方式
-        try:
             raw_docs = loader.load()
-        except Exception as e:
-            # 如果 utf-8/自动探测 彻底跪了，最后尝试一次 latin-1 暴力破解
-            if filename.lower().endswith(".txt"):
-                logger.warning(f"⚠️ [编码最终尝试] {filename} 切换至 latin-1")
-                loader = TextLoader(file_path, encoding="latin-1")
-                raw_docs = loader.load()
-            else:
-                raise e
 
-        # 3. 注入 Metadata 契约
+        # 2. 注入 Metadata 契约 (歸一化路徑標籤)
+
+        # 獲取相對於數據根目錄的相對路徑，並統一轉換為正斜槓，解決跨平台對齊問題
+        # 將 'folder\file.txt' 統一轉為 'folder/file.txt'，作為全局唯一識別碼
+        rel_file_path = os.path.relpath(file_path, base_directory)
+        normalized_source = rel_file_path.replace('\\', '/')
+
         for doc in raw_docs:
-            doc.metadata["source"] = filename
+            doc.metadata["source"] = normalized_source
             doc.metadata["domain"] = domain
-            doc.metadata["ingest_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            doc.metadata["ingest_time"] = ingest_time
 
-        # 4. 执行物理切片 (维持 context 连续性)
+        # 3. 执行物理切片
         splits = _SPLITTER.split_documents(raw_docs)
         logger.info(f"✅ [已标记 - {domain}] 加载成功: {filename} ({len(splits)} chunks)")
         return splits

@@ -3,15 +3,22 @@ import os
 from typing import List
 from app.core.logger import logger
 
-# 尝试导入非必须库，防止报错
+# 尝试导入pdf庫
 try:
     import PyPDF2
-    import docx
-
     PDF_SUPPORT = True
 except ImportError:
     PDF_SUPPORT = False
-    logger.warning("⚠️ 未安装 PDF/Word 库，仅支持 TXT 格式。请运行: pip install pypdf2 python-docx")
+    logger.warning("⚠️ 未安装 PyPDF2库，PDF 文件无法解析。请运行: pip install pypdf2 python-docx")
+
+
+# 尝试导入word庫
+try:
+    import docx
+    DOCX_SUPPORT = True
+except ImportError:
+    DOCX_SUPPORT = False
+    logger.warning("⚠️ 未安装 python-docx 库，Word 文件无法解析。请运行: pip install pypdf2 python-docx")
 
 
 def load_document(file_path: str) -> str:
@@ -45,11 +52,18 @@ def load_document(file_path: str) -> str:
 
     # 3. 处理 Word
     elif ext == '.docx':
-        if not PDF_SUPPORT:
+        if not DOCX_SUPPORT:
             raise ImportError("需要安装 python-docx 库")
         doc = docx.Document(file_path)
         for para in doc.paragraphs:
             content += para.text + "\n"
+    # Excel 顯式拒絕
+    elif ext in ['.xlsx', '.xls']:
+        # 對齊 P2-Q1：Excel 顯式拒絕
+        raise NotImplementedError(
+            f"Excel 文件 {os.path.basename(file_path)} 當前處於實驗性支持階段，"
+            "存在解析穩定性問題。暫時請轉換為 CSV 或 TXT 格式後導入。"
+        )
 
     else:
         logger.warning(f"⚠️ 不支持的文件格式: {ext}，尝试以文本读取")

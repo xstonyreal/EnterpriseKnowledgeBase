@@ -12,6 +12,7 @@ from app.services.watcher_service import start_sentinel
 from app.core.engine import get_chat_response_stream
 from app.config import settings
 
+
 # ==========================================
 # 0. 2026 UI 规范常量 (强制规避废弃 API)
 # ==========================================
@@ -91,8 +92,8 @@ with st.sidebar:
         new_domain = st.text_input("请输入新业务域名称")
         if new_domain:
             selected_domain = new_domain
-
-    uploaded_assets = st.file_uploader("注入资产 (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
+    # 上傳的文檔支持類型
+    uploaded_assets = st.file_uploader("注入资产 (PDF/TXT/DOCX/XLSX/PPTX)", type=["pdf", "txt", "docx", "xlsx", "pptx"], accept_multiple_files=True)
 
     # 【用户主动触发】：接入指纹识别后的智能同步
     if st.button("同步至认知空间", type="primary", width=UI_WIDTH_STRETCH):
@@ -118,7 +119,7 @@ with st.sidebar:
             check_manifest=True)
             status.update(label="✅ 认知空间已同步", state="complete")
         # 强制重跑，是右侧看板警告消失
-        st.rerun()
+        # st.rerun() DS suggest del
 
     st.markdown("---")
 
@@ -173,10 +174,15 @@ with col_chat:
                 # 传入 Domain 过滤器，实现物理隔离检索
                 stream_gen, sources = get_chat_response_stream(prompt, filter_domain=selected_domain)
 
+                # DS TEST
+                print("DEBUG sources:", sources)
+
                 for chunk in stream_gen:
                     full_response += chunk
                     response_placeholder.markdown(full_response + "▌")
                 response_placeholder.markdown(full_response)
+                # test
+                st.write(f"DEBUG: sources 長度 = {len(sources)}")
 
                 if sources:
                     with st.expander("🎓 認知溯源 (Matrix Provenance)", expanded=True):
