@@ -362,3 +362,35 @@ git push origin dev
 - [ ] **API 接口原型**：`/query` 和 `/ingest` 基礎版本
 
 ---
+【核心變更說明】2026-05-07
+
+數據持久化層 (Safe-Storage)：
+
+實裝 portalocker 進程鎖與線程鎖，解決多進程併發寫入衝突。
+
+引入「臨時寫入-原子替換」機制，徹底杜絕斷電或崩潰導致的索引損壞 (0KB 隱患)。
+
+增加自動備份邏輯，在重塑索引前對舊庫進行時間戳備份。
+
+跨平台路徑歸一化 (Path Normalization)：
+
+全量遷移至 pathlib.Path，強制使用 .as_posix() (正斜槓)。
+
+解決 Windows/Linux 環境下因路徑分隔符不一致導致的資產指紋失效問題。
+
+解析引擎升級 (Ingest Refactor)：
+
+重構為 process_file_to_docs 單一入口。
+
+夯實編碼探測邏輯，精確捕獲 UnicodeDecodeError，消除「沉默失敗」。
+
+修復 PyCharm 類型檢查警告，提升代碼靜態安全性。
+
+監控哨兵優化 (Watcher Robustness)：
+
+增加 get_source_manifest 的目錄存在性檢查，防止系統冷啟動崩潰。
+
+優化導入路徑與 sys.path 適配，支持「模塊運行」與「腳本運行」雙模式。
+
+
+

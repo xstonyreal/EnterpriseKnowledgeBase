@@ -196,53 +196,53 @@ L3	定时重建	每日 02:00 清理墓碑标记
 | 定时任务 | apscheduler | ≥3.10 |
 | 并发锁 | portalocker | ≥2.8 |
 
-📂 目录结构
-text
+## 📂 完整目錄結構
+
+```text
 EnterpriseKnowledgeBase/  
-├── .env # 【核心配置】隔离敏感信息（API Key/模型版本/数据库地址）  
-├── .gitignore # 【资产过滤】防止将缓存、索引及虚拟环境推送到 Git  
-├── plan.md # 【研发路线】记录 Sprint 计划、待办事项 (Backlog) 与 Bug 修复进度  
-├── Architecture Contract.md # 【开发规约】约束代码风格、层级调用逻辑与模块职责边界  
-├── main.py # 【入口 A】后端 CLI 交互中心，用于本地测试与维护  
-├── app_ui.py # 【入口 B】Streamlit 全栈 UI，2026 风格业务操作台  
-├── requirements.txt # 【环境依赖】项目运行所需的 Python 库锁本  
+├── .env                    # 【核心配置】隔離敏感信息（模型版本/數據庫地址/路徑）
+├── .gitignore              # 【資產過濾】防止緩存、索引及虛擬環境推送到 Git
+├── plan.md                 # 【研發路線】記錄 Sprint 計劃、待辦事項與 Bug 進行度
+├── Architecture Contract.md # 【開發規約】約束代碼風格、層級調用邏輯與職責邊界
+├── main.py                 # 【入口 A】後端 CLI 交互中心，用於本地測試與維護
+├── app_ui.py               # 【入口 B】Streamlit 全棧 UI，業務操作終端
+├── requirements.txt        # 【環境依賴】項目運行所需的 Python 庫清單
 │  
-├── data/ # 【数据资产层】  
-│ ├── uploads/ # [输入] 原始业务文档，支持按部门/业务线创建子文件夹  
-│ └── vector_db/ # [输出] 持久化 FAISS 语义索引，支持"秒级加载"  
+├── data/                   # 【數據資產層】
+│   ├── uploads/            # [輸入] 原始業務文檔，支持按部門/業務線創建子文件夾
+│   └── vector_db/          # [輸出] 持久化 FAISS 語義索引，支持"秒級加載"
 │  
-└── app/ # 【逻辑心脏层】  
-├── init.py # 模块导出声明  
-├── config.py # 全局配置单例：基于 Pydantic 的类型安全配置管理  
-│  
-├── api/ # 【接口层】基于 FastAPI 的分布式扩展预留  
-│ ├── chat.py # 对话状态管理、会话持久化逻辑  
-│ └── endpoints.py # 外部 API 路由分发中心  
-│  
-├── core/ # 【引擎层】RAG 系统的核心大脑  
-│ ├── engine.py # 调度核心：负责检索、上下文组装与 LLM 推理联动  
-│ ├── logger.py # 审计系统：全局结构化日志记录与错误追踪  
-│ └── prompts.py # 提示词库：多场景保险业务专家级 Prompt 模板  
-│  
-├── models/ # 【模型层】异构计算适配  
-│ ├── llm.py # 本地认知引擎封装 (Ollama/Qwen)  
-│ └── embeddings.py # 向量化模型封装 (Nomic/HuggingFace)  
-│  
-├── pipeline/ # 【流水线层】非结构化数据治理  
-│ ├── ingest.py # 数据分片 (Chunking) 与向量入库核心原子操作  
-│ ├── loader.py # 多模态适配器：PDF、Word、TXT、Markdown 的解析读取  
-│ └── watcher.py # 文件探测逻辑：获取目录结构、元数据提取  
-│  
-├── services/ # 【服务层】业务逻辑聚合  
-│ ├── ingest_service.py # 调度中枢：处理重构、并发入库与单例生命周期管理  
-│ ├── watcher_service.py# 异步服务：目录变更的监听与热挂载调度  
-│ └── search_service.py # 混合检索引擎（FAISS + BM25 + RRF）  
-│  
-├── storage/ # 【存储适配层】  
-│ └── vector_db.py # 向量数据库驱动：执行语义搜索与 Metadata 过滤  
-│  
-└── utils/ # 【工具集】通用逻辑复用  
-└── init.py # 文件哈希、时间转换等独立工具函数  
+└── app/                    # 【邏輯心臟層】
+    ├── __init__.py         # 模塊導出聲明
+    ├── config.py           # 全局配置單例：基於 Pydantic 的類型安全配置管理
+    │  
+    ├── api/                # 【接口層】基於 FastAPI 的分佈式擴展預留
+    │   ├── chat.py         # 對話狀態管理、會話持久化邏輯
+    │   └── endpoints.py    # 外部 API 路由分發中心
+    │  
+    ├── core/               # 【引擎層】RAG 系統的核心大腦
+    │   ├── engine.py       # 調度核心：負責檢索、上下文組裝與 LLM 推理聯動
+    │   ├── logger.py       # 審計系統：全局結構化日誌記錄與錯誤追蹤
+    │   └── prompts.py      # 提示詞庫：多場景專家級 Prompt 模板
+    │  
+    ├── models/             # 【模型層】異構計算適配
+    │   ├── llm.py          # 本地認知引擎封裝 (Ollama/Qwen)
+    │   └── embeddings.py   # 向量化模型封裝 (Nomic/HuggingFace)
+    │  
+    ├── pipeline/           # 【流水線層】非結構化數據治理
+    │   ├── ingest.py       # 數據分片 (Chunking) 與向量入庫核心原子操作
+    │   ├── loader.py       # 多模態適配器：PDF、Word、TXT、Markdown 的解析
+    │   └── watcher.py      # 文件探測邏輯：獲取目錄結構、元數據提取
+    │  
+    ├── services/           # 【服務層】業務邏輯聚合
+    │   ├── ingest_service.py  # 調度中樞：處理重構、併發入庫與生命週期管理
+    │   ├── watcher_service.py # 異步服務：目錄變更的監聽與熱掛載調度
+    │   └── search_service.py  # 混合檢索引擎（FAISS + BM25 + RRF）
+    │  
+    ├── storage/            # 【存儲適配層】
+    │   └── vector_db.py    # 向量數據庫驅動：執行語義搜索與 Metadata 過濾
+    │  
+    └── utils/              # 【工具集】通用邏輯復用
 📖 API 参考
 initialize_knowledge_base(force_rebuild=False, check_manifest=True)
 参数	类型	默认值	说明
@@ -269,7 +269,12 @@ streamlit run app_ui.py --server.port 8502
 # 同时点击同步，观察锁日志
 
 📋 更新日志
-2026-05-07 (最新更新 🚀)📋 更新日志
+2026-05-07 (最新更新 🚀)
+✅ 環境衝突治理：完成 .streamlit/config.toml 集成，禁用 fileWatcher 解決 torchvision 報錯。
+
+✅ 域隔離驗證：測試並確認物理分域過濾邏輯在「核心決策層」與「未分類資產」間運行正常。
+
+
 新增功能：2026-05-05
 
 ✅ 完善 Streamlit UI 冷热启动拦截器完成三层跨进程锁集成

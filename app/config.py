@@ -4,6 +4,7 @@ import os
 from typing import ClassVar, Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -34,10 +35,14 @@ class Settings(BaseSettings):
     # ==========================================
     # 📂 數據存儲路徑（自動計算絕對路徑）
     # ==========================================
-    BASE_DIR: ClassVar[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DATA_DIR: ClassVar[str] = os.path.join(BASE_DIR, "data")
+    # BASE_DIR: ClassVar[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # DATA_DIR: ClassVar[str] = os.path.join(BASE_DIR, "data")
+    BASE_DIR: ClassVar[Path] = Path(__file__).resolve().parent.parent
+    DATA_DIR: ClassVar[Path] = BASE_DIR / "data"
 
-    VECTOR_DB_DIR: str = os.path.join(DATA_DIR, "vector_db")
+    # VECTOR_DB_DIR: str = os.path.join(DATA_DIR, "vector_db")
+
+    VECTOR_DB_DIR: Path = DATA_DIR / "vector_db"
     DATA_UPLOAD_DIR: str = os.path.join(DATA_DIR, "uploads")
     BM25_DB_DIR: str = os.path.join(DATA_DIR, "bm25_db")
 

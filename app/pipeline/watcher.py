@@ -13,9 +13,13 @@ from app.utils.hash_utils import calculate_file_hash # 引入指纹
 # 保留導入（當前未使用，預留給未來自動觸發功能）
 # 適配兩種運行方式：正常啟動 或 直接運行腳本
 try:
-    from app.pipeline.ingest import ingest_documents  # 完整項目路徑
+    from app.pipeline.ingest import process_file_to_docs  # 完整項目路徑
 except ImportError:
-    from ingest import ingest_documents               # 腳本模式備份
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(current_dir))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from app.pipeline.ingest import process_file_to_docs
 
 
 class IngestHandler(FileSystemEventHandler):
@@ -59,6 +63,7 @@ class IngestHandler(FileSystemEventHandler):
         # 4. 稳态等待：只有新增/变动需要等待 IO，移除直接通过
         if action_type != "移除":
             time.sleep(2)
+            logger.debug(f"🔍 [預解析檢查] 目標文件路徑: {file_path}")
 
         logger.info(f"📡 [哨兵] 已捕捉资产{action_type}，待用户手动触发认知同步。")
 
@@ -95,9 +100,15 @@ def get_source_manifest(upload_dir: str) -> dict:
     manifest = {}
     base_path = Path(upload_dir)
 
+    # 【防禦性檢查】若目錄不存在則返回空清單，防止冷啟動或目錄被手動刪除時報錯
+    # 此邏輯確保了 initialize_knowledge_base 在初次運行時能拿到空字典而非 Crash
+    if not base_path.exists():
+        logger.warning(f"⚠️ [Manifest] 目錄不存在，返回空清單: {upload_dir}")
+        return {}
+
     for file_path in base_path.rglob("*"):
         if file_path.is_file() and not file_path.name.startswith("."):
-            # 获取相对路径并强制转换为 POSIX 风格 (正斜杠)
+            # 获取相对路径并强制转换为 POSIX 风格 (正斜杠)，確保數據庫路徑一致性
             relative_path = file_path.relative_to(base_path).as_posix()
             manifest[relative_path] = calculate_file_hash(file_path)
 
