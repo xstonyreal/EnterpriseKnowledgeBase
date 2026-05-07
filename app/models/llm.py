@@ -6,7 +6,7 @@ from app.config import settings
 
 
 # ==========================================
-# 判断.env 文件是否存在jn
+# 判断.env 文件是否存在
 # ==========================================
 from app.core.logger import logger
 

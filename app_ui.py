@@ -11,35 +11,53 @@ from app.pipeline.watcher import get_source_manifest # 确保引入指纹扫描�
 from app.services.watcher_service import start_sentinel
 from app.core.engine import get_chat_response_stream
 from app.config import settings
+from app.services.domain_service import (
+    init_domains,
+    get_active_domains,
+    get_all_domains,
+    create_domain,
+    update_domain,
+    delete_domain,
+    sync_physical_to_json
+)
+from app.ui_logger import add_ui_log, clear_ui_logs, get_ui_logs
+add_ui_log("🔥 开始全量重建")
+add_ui_log("📄 加载文件: test.txt")
+add_ui_log("✅ 同步完成")
+
+print("當前磁盤指紋:")
+current = get_source_manifest(settings.DATA_UPLOAD_DIR)
+for k, v in current.items():
+    print(f"  {k}: {v}")
+
+print("\n保存的指紋:")
+saved = get_saved_manifest()
+for k, v in saved.items():
+    print(f"  {k}: {v}")
+
+print(f"\n是否一致: {current == saved}")
 
 
 # ==========================================
 # 0. 2026 UI 规范常量 (强制规避废弃 API)
 # ==========================================
 # 严格禁止使用 use_container_width=True，必须使用以下常量
-UI_WIDTH_STRETCH= 'stretch'  # 铺满容器
-UI_WIDTH_CONTENT = 'content'  # 自适应内容
-
+UI_WIDTH_STRETCH= "stretch"  # 铺满容器
+UI_WIDTH_CONTENT = "content"  # 自适应内容
 
 # ==========================================
-# 1. 启动逻辑与物理状态预检 (核心优化点)
+# 0. 启动定时任务（每日凌晨 2:00 全量重建）  ← 加在这里
 # ==========================================
+from app.scheduler import start_daily_rebuild
+start_daily_rebuild()
 
-def get_dynamic_domains():
-    """动态获取业务域：通过物理文件夹结构反向映射 UI 选项"""
-    _base_dir = settings.DATA_UPLOAD_DIR
-    default_domains = ["核心决策层", "未分类资产"]
-    if not os.path.exists(_base_dir):
-        os.makedirs(_base_dir, exist_ok=True)
-        return default_domains
-
-    # 扫描物理子目录作为业务域，实现“文件夹即权限”
-    existing_dirs = [
-        d for d in os.listdir(_base_dir)
-        if os.path.isdir(os.path.join(_base_dir, d)) and not d.startswith(('.', '_'))
-    ]
-    return sorted(list(set(default_domains + existing_dirs)))
-
+# ==========================================
+# 1. 启动逻辑与物理状态预检 (核心优化点) 暫時廢除
+# ==========================================
+# 初始化域數據
+if "domains_initialized" not in st.session_state:
+    init_domains()
+    st.session_state.domains_initialized = True
 
 # --- [冷热启动拦截器] ---
 # 目的：防止启动时因磁盘无索引而触发耗时的“全量重塑”动作
@@ -85,8 +103,15 @@ with st.sidebar:
     st.markdown("---")
 
     st.subheader("📥 知识资产注入")
-    domains = get_dynamic_domains()
-    selected_domain = st.selectbox("目标业务域", domains + ["+ 新增业务域..."])
+    # domains = get_dynamic_domains() 廢除通過物理文件夾來獲取域的信息
+    # 使用 domain_service 获取域列表
+    domains = get_active_domains()
+
+    if not domains:
+        st.warning("⚠️ 暂无业务域，请先在下方「系统管理」中创建")
+        selected_domain = "未分类资产"
+    else:
+        selected_domain = st.selectbox("目標業務域", domains + ["+ 新增業務域..."])
 
     if selected_domain == "+ 新增业务域...":
         new_domain = st.text_input("请输入新业务域名称")
@@ -97,6 +122,9 @@ with st.sidebar:
 
     # 【用户主动触发】：接入指纹识别后的智能同步
     if st.button("同步至认知空间", type="primary", width=UI_WIDTH_STRETCH):
+        # 清空旧日志，开始新任务
+        clear_ui_logs()
+
         # A. 物理保存 (仅当 通过UI 上传新文件时)
         if uploaded_assets:
             save_path = os.path.join(settings.DATA_UPLOAD_DIR, selected_domain)
@@ -116,23 +144,122 @@ with st.sidebar:
             # force_rebuild=False: 允许系统“变聪明”，没变动就不重构。
             # check_manifest=True: (默认值) 强制进行磁盘扫描，指纹对比，确保能发现新上传的文件。
             st.session_state.knowledge_engine = initialize_knowledge_base(force_rebuild=False,
-            check_manifest=True)
+            check_manifest=True, is_ui_click=True)
             status.update(label="✅ 认知空间已同步", state="complete")
         # 强制重跑，是右侧看板警告消失
         # st.rerun() DS suggest del
 
     st.markdown("---")
 
-    # 强制全量审计依然保留 force_rebuild=True，作为最终兜底手段
-    if st.button("🔄 强制执行全量索引审计", width=UI_WIDTH_STRETCH):
+    # ========== 实时日志面板 ==========
+    with st.expander("📋 实时运行日志", expanded=False):
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("🗑️ 清空", use_container_width=True):
+                clear_ui_logs()
+                st.rerun()
+
+        logs = get_ui_logs()
+        if logs:
+            # 使用 code 块显示，保持等宽字体
+            log_text = "\n".join(logs[-50:])
+            st.code(log_text, language="log", line_numbers=False)
+        else:
+            st.caption("暂无日志，请点击同步按钮开始...")
+
+        st.caption(f"📊 共 {len(logs)} 条日志")
+    # ========== 实时日志面板 ==========
+
+    # 强制全量索引审计按钮
+    if st.button("🔄 强制执行全量索引审计", use_container_width=True):
         with st.status("⚡ 认知空间自愈中...", expanded=True) as status:
             st.session_state.knowledge_engine = initialize_knowledge_base(force_rebuild=True)
             status.update(label="🎉 索引重塑完成", state="complete")
         st.toast("全量索引已重建")
 
-    if st.button("🗑️ 清空交互上下文", width=UI_WIDTH_STRETCH):
-        st.session_state.messages = []
-        st.rerun()
+    # ========== 管理員面板（摺疊） ==========
+    with st.expander("🔧 系統管理 (域配置)", expanded=False):
+        st.subheader("🏷️ 業務域管理")
+
+        # ---------- 新增域表單 ----------
+        with st.form("add_domain_form"):
+            st.caption("新增業務域")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                new_name = st.text_input("域名稱", key="new_domain_name", placeholder="例如: 財務部")
+            with col2:
+                new_desc = st.text_input("描述（可選）", key="new_domain_desc", placeholder="簡要描述")
+
+            submitted = st.form_submit_button("➕ 新增域", use_container_width=True)
+
+            if submitted and new_name:
+                if create_domain(new_name.strip(), new_desc):
+                    st.success(f"✅ 已創建域: {new_name}")
+                    st.rerun()
+                else:
+                    st.error("創建失敗，域名稱可能已存在")
+
+        st.divider()
+
+        # ---------- 現有域列表 ----------
+        st.caption("現有業務域")
+        all_domains = get_all_domains()
+
+        if not all_domains:
+            st.info("暫無業務域，請先創建")
+        else:
+            for domain in all_domains:
+                col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1])
+
+                with col1:
+                    if domain["status"] == "deleted":
+                        st.markdown(f"~~{domain['name']}~~")
+                    else:
+                        st.text(domain["name"])
+
+                with col2:
+                    desc = domain.get("description", "")
+                    st.caption(desc[:40] + "..." if len(desc) > 40 else desc)
+
+                with col3:
+                    status_text = "🟢 啟用" if domain["status"] == "active" else "⚪ 已禁用"
+                    st.caption(status_text)
+
+                with col4:
+                    if domain["status"] == "active":
+                        if st.button(f"🗑️ 禁用", key=f"del_{domain['name']}"):
+                            delete_domain(domain["name"], hard=False)
+                            st.rerun()
+                    else:
+                        # 軟刪除的域可以恢復
+                        if st.button(f"🔄 恢復", key=f"res_{domain['name']}"):
+                            update_domain(domain["name"], reactivate=True)
+                            st.rerun()
+
+        # ---------- 高級操作（可摺疊）----------
+        with st.expander("⚠️ 高級操作", expanded=False):
+            st.caption("硬刪除會同時刪除物理文件夾，不可恢復")
+
+            # 顯示可硬刪除的域
+            deleted_domains = [d for d in all_domains if d.get("status") == "deleted"]
+            if deleted_domains:
+                for domain in deleted_domains:
+                    if st.button(f"🔥 徹底刪除 {domain['name']}", key=f"hard_del_{domain['name']}"):
+                        delete_domain(domain["name"], hard=True)
+                        st.rerun()
+            else:
+                st.caption("暫無可徹底刪除的域")
+
+            st.divider()
+
+            # 手動同步物理文件夾
+            if st.button("🔄 同步物理文件夾", use_container_width=True):
+                count = sync_physical_to_json()
+                if count > 0:
+                    st.success(f"✅ 已同步 {count} 個新文件夾")
+                else:
+                    st.info("無新增文件夾")
+                st.rerun()
 
 # ==========================================
 # 4. 主界面：智慧交互与溯源
@@ -175,14 +302,14 @@ with col_chat:
                 stream_gen, sources = get_chat_response_stream(prompt, filter_domain=selected_domain)
 
                 # DS TEST
-                print("DEBUG sources:", sources)
+                # print("DEBUG sources:", sources)
 
                 for chunk in stream_gen:
                     full_response += chunk
                     response_placeholder.markdown(full_response + "▌")
                 response_placeholder.markdown(full_response)
                 # test
-                st.write(f"DEBUG: sources 長度 = {len(sources)}")
+                # st.write(f"DEBUG: sources 長度 = {len(sources)}")
 
                 if sources:
                     with st.expander("🎓 認知溯源 (Matrix Provenance)", expanded=True):
@@ -237,12 +364,6 @@ with col_history:
 
     # --- [新增逻辑]：为了判断状态，先读取指纹快照 ---
     manifest_data = get_saved_manifest()
-    if os.path.exists(os.path.join(settings.VECTOR_DB_DIR, "manifest.json")):
-        try:
-            with open(os.path.join(settings.VECTOR_DB_DIR, "manifest.json"), "r", encoding="utf-8") as f:
-                manifest_data = json.load(f)
-        except Exception:
-            manifest_data = {}
 
     asset_history = []
     base_dir = settings.DATA_UPLOAD_DIR

@@ -3,7 +3,7 @@ from app.models.embeddings import embeddings
 from app.config import settings
 import os
 
-# 1. 定位索引路径 (根据您 config.py 里的设置拼接)
+# 1. 定位索引路径 (根据 config.py 里的设置拼接)
 db_path = os.path.join(settings.CHROMA_PERSIST_DIR, "faiss_index")
 
 print(f"🔍 正在检查索引目录: {db_path}")

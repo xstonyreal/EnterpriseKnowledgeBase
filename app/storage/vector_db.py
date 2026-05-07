@@ -10,10 +10,15 @@ def load_vector_db():
     """
     加载本地 FAISS 索引
     """
-    db_path = os.path.join(settings.VECTOR_DB_DIR, "faiss_index")
+    db_path = settings.VECTOR_DB_DIR
 
     if not os.path.exists(db_path):
-        logger.warning(f"⚠️ 向量库不存在: {db_path}")
+        logger.warning(f"⚠️ 向量库目錄不存在: {db_path}")
+        return None
+
+    index_path = os.path.join(db_path, "index.faiss")
+    if not os.path.exists(index_path):
+        logger.warning(f"⚠️ 向量库不存在: {index_path}")
         return None
 
     logger.info(f"📚 正在加载向量库: {db_path}")
@@ -24,7 +29,6 @@ def load_vector_db():
     except Exception as e:
         logger.error(f"❌ 向量库加载失败: {e}")
         return None
-
 
 # 全局单例，避免重复加载
 vector_db = load_vector_db()

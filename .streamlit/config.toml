@@ -1,0 +1,7 @@
+[server]
+# 禁用文件監視器，防止它掃描 site-packages 導致的 torchvision 報錯
+fileWatcherType = "none"
+
+[browser]
+# 順便關閉這個，減少不必要的網絡請求
+gatherUsageStats = false

@@ -12,6 +12,7 @@ from app.core.logger import logger
 # --- [M3 核心注入] ---
 # 引入我們剛剛建立的混合檢索服務
 from app.services.search_service import SearchService
+from app.services.rerank_service import get_rerank_service # rerank
 
 # 實例化搜尋服務單例
 search_svc = SearchService()
@@ -53,12 +54,20 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
     try:
         # 2. 🔍 [核心變動]：執行混合檢索，獲取 RRF 融合結果
         # top_n 取 settings.TOP_K * 2，為後續的 Domain 過濾預留空間
-        raw_results = search_svc.hybrid_search(query, top_n=settings.TOP_K * 2)
+        raw_results = search_svc.hybrid_search(query, top_n=settings.TOP_K * 3)
 
         if not raw_results:
             def empty_gen(): yield f"⚠️ 在業務域 **[{filter_domain}]** 中未發現相關線索，已攔截幻覺輸出。"
 
             return empty_gen(), []
+
+        # 2.5 🎯 新增：Rerank 重排序（精排）
+        if settings.ENABLE_RERANK and raw_results and len(raw_results) > settings.TOP_K:
+            try:
+                reranker = get_rerank_service()
+                raw_results = reranker.rerank(query, raw_results, top_n=settings.TOP_K * 2)
+            except Exception as e:
+                logger.warning(f"Rerank 失败，使用原结果: {e}")
 
         # 3. 🛡️ 業務域隔離過濾
         sources = []

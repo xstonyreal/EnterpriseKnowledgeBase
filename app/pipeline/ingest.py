@@ -63,7 +63,7 @@ def process_file_to_docs(file_path: str) -> List[Document]:
             # --- [修正：建立中文优先的编码探测逻辑] ---
             # 放弃直接调用 autodetect_encoding，改为手动尝试中文编码链
             raw_docs = []
-            encodings_to_try = ["GB2312","utf-8", "big5"]
+            encodings_to_try = ["GB2312","utf-8", "GBK", "GB18030","big5"]
             success = False
 
             for enc in encodings_to_try:

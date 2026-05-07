@@ -44,13 +44,18 @@ class Settings(BaseSettings):
     # ==========================================
     # 📝 文本處理參數（RAG 核心）
     # ==========================================
-    CHUNK_SIZE: int = 800
-    CHUNK_OVERLAP: int = 120
+    CHUNK_SIZE: int = 400
+    CHUNK_OVERLAP: int = 50
+
+    # ==========================================
+    # 📝 rerank 開關參數
+    # ==========================================
+    ENABLE_RERANK: bool = False  # CPU 無法跑動rerank，硬件升级后改为 True
 
     # ==========================================
     # 🎯 混合檢索與 RRF 調參
     # ==========================================
-    TOP_K: int = 3
+    TOP_K: int = 1
     RETRIEVAL_OVERSIZE_RATIO: int = 3
     RRF_K: int = 60
     VECTOR_DB_COLLECTION: str = "documents"

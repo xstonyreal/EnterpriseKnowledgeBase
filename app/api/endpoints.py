@@ -1,5 +1,5 @@
 
-# models/embeddings.py
+# app/api/endpoints.py
 # 1. 修改导入：从 langchain_ollama 导入，而不是 langchain_openai
 from langchain_ollama import OllamaEmbeddings
 from app.config import settings
