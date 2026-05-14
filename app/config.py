@@ -1,84 +1,77 @@
-# app/config.py
-
 import os
-from typing import ClassVar, Optional, List
+from typing import ClassVar, List, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from pathlib import Path
+from dotenv import load_dotenv
 
+# ============================
+# 全局线程安全配置（工业级标准）
+# ============================
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+# 强制加载环境变量
+load_dotenv()
 
 class Settings(BaseSettings):
     # ==========================================
-    # 項目基礎
+    # 项目基础
     # ==========================================
     PROJECT_NAME: str = "Matrix Intelligence"
 
     # ==========================================
-    # 模型服務配置
+    # 服务配置
     # ==========================================
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OPENAI_API_KEY: str = "ollama"
 
     # ==========================================
-    # 核心模型選擇
+    # 模型配置
     # ==========================================
     LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_MODEL: str = "nomic-embed-text"
+    RERANK_MODEL_NAME: str = "BAAI/bge-reranker-base"
 
     # ==========================================
-    # 🛡️ LLM 推理與安全參數
+    # RAG 核心参数
+    # ==========================================
+    ENABLE_RERANK: bool = False
+    CHUNK_SIZE: int = 400
+    CHUNK_OVERLAP: int = 50
+    TOP_K: int = 5
+    RETRIEVAL_OVERSIZE_RATIO: int = 3
+    RRF_K: int = 60
+    HYBRID_SEARCH_WEIGHTS: List[float] = [0.6, 0.4]
+
+    # ==========================================
+    # LLM 参数
     # ==========================================
     LLM_TEMPERATURE: float = 0.1
     LLM_NUM_CTX: int = 4096
     LLM_TIMEOUT: int = 120
 
     # ==========================================
-    # 📂 數據存儲路徑（自動計算絕對路徑）
-    # ==========================================
-    # BASE_DIR: ClassVar[str] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # DATA_DIR: ClassVar[str] = os.path.join(BASE_DIR, "data")
-    BASE_DIR: ClassVar[Path] = Path(__file__).resolve().parent.parent
-    DATA_DIR: ClassVar[Path] = BASE_DIR / "data"
-
-    # VECTOR_DB_DIR: str = os.path.join(DATA_DIR, "vector_db")
-
-    VECTOR_DB_DIR: Path = DATA_DIR / "vector_db"
-    DATA_UPLOAD_DIR: str = os.path.join(DATA_DIR, "uploads")
-    BM25_DB_DIR: str = os.path.join(DATA_DIR, "bm25_db")
-
-    # ==========================================
-    # 📝 文本處理參數（RAG 核心）
-    # ==========================================
-    CHUNK_SIZE: int = 400
-    CHUNK_OVERLAP: int = 50
-
-    # ==========================================
-    # 📝 rerank 開關參數
-    # ==========================================
-    ENABLE_RERANK: bool = False  # CPU 無法跑動rerank，硬件升级后改为 True
-
-    # ==========================================
-    # 🎯 混合檢索與 RRF 調參
-    # ==========================================
-    TOP_K: int = 1
-    RETRIEVAL_OVERSIZE_RATIO: int = 3
-    RRF_K: int = 60
-    VECTOR_DB_COLLECTION: str = "documents"
-
-    # ==========================================
-    # ⚡ 負載與併發控制
+    # 并发 & 日志
     # ==========================================
     BATCH_SIZE: int = 32
     INGEST_MAX_WORKERS: int = 4
-
-    # ==========================================
-    # 📋 日誌配置
-    # ==========================================
     LOG_LEVEL: str = "INFO"
 
     # ==========================================
-    # 🔧 特殊域配置（預留，未來 UI 可配置）
+    # 固定结构 & 路径（不进 env）
     # ==========================================
+    BASE_DIR: ClassVar[Path] = Path(__file__).resolve().parent.parent
+    DATA_DIR: ClassVar[Path] = BASE_DIR / "data"
+
+    VECTOR_DB_DIR: Path = DATA_DIR / "vector_db"
+    DATA_UPLOAD_DIR: Path = DATA_DIR / "uploads"
+    BM25_DB_DIR: Path = DATA_DIR / "bm25_db"
+    MANIFEST_FILE: Path = DATA_DIR / "vector_db" / "manifest.json"
+    RERANK_MODEL_PATH: Path = BASE_DIR / "models" / "bge_reranker_base"
+
     SPECIAL_DOMAINS: List[str] = ["全域", "核心决策层", "未分类资产"]
 
     # ==========================================
@@ -90,46 +83,79 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    # ==========================================
+    # 强力清洗过滤器（全部保留）
+    # ==========================================
+    @field_validator("ENABLE_RERANK", mode="before")
+    @classmethod
+    def clean_bool(cls, v: Any) -> bool:
+        if isinstance(v, str):
+            clean_v = v.split('#')[0].strip().lower()
+            return clean_v == 'true'
+        return bool(v)
+
+    @field_validator("LLM_NUM_CTX", "LLM_TIMEOUT", "CHUNK_SIZE", "CHUNK_OVERLAP", "TOP_K", mode="before")
+    @classmethod
+    def clean_int(cls, v: Any) -> int:
+        if isinstance(v, str):
+            clean_v = v.split('#')[0].strip()
+            return int("".join(filter(str.isdigit, clean_v)) or 0)
+        return int(v)
+
+    @field_validator("LLM_TEMPERATURE", mode="before")
+    @classmethod
+    def clean_float(cls, v: Any) -> float:
+        if isinstance(v, str):
+            clean_v = v.split('#')[0].strip()
+            return float(clean_v)
+        return float(v)
+
     @field_validator("SPECIAL_DOMAINS", mode="before")
     @classmethod
-    def parse_special_domains(cls, v):
-        """解析 .env 中的逗號分隔字符串"""
+    def parse_domains(cls, v: Any) -> List[str]:
         if isinstance(v, str):
-            return [d.strip() for d in v.split(",") if d.strip()]
+            clean_v = v.split('#')[0].strip()
+            return [d.strip() for d in clean_v.split(",") if d.strip()]
         return v
 
-    def model_post_init(self, __context) -> None:
-        """配置加載後校驗與初始化"""
-        self._validate_chunk_params()
-        self._ensure_directories()
+    @field_validator("HYBRID_SEARCH_WEIGHTS", mode="before")
+    @classmethod
+    def parse_weights(cls, v: Any) -> List[float]:
+        if isinstance(v, str):
+            clean_v = v.split('#')[0].strip()
+            return [float(i) for i in clean_v.split(",") if i.strip()]
+        return v
 
-    def _validate_chunk_params(self) -> None:
-        """校驗分塊參數範圍"""
-        if not (400 <= self.CHUNK_SIZE <= 1200):
-            raise ValueError(f"CHUNK_SIZE 必須在 400-1200 範圍內，當前值: {self.CHUNK_SIZE}")
+    # ==========================================
+    # 初始化钩子
+    # ==========================================
+    def model_post_init(self, __context) -> None:
+        self._ensure_directories()
+        self._ensure_nltk_data()
+        self._validate_logic()
+
+    def _validate_logic(self) -> None:
         if self.CHUNK_OVERLAP >= self.CHUNK_SIZE:
-            raise ValueError(f"CHUNK_OVERLAP ({self.CHUNK_OVERLAP}) 必須小於 CHUNK_SIZE ({self.CHUNK_SIZE})")
-        if self.CHUNK_OVERLAP < 0:
-            raise ValueError(f"CHUNK_OVERLAP 不能為負數")
+            raise ValueError("CHUNK_OVERLAP 必須小於 CHUNK_SIZE")
 
     def _ensure_directories(self) -> None:
-        """確保必要目錄存在"""
         for dir_path in [self.DATA_DIR, self.VECTOR_DB_DIR, self.DATA_UPLOAD_DIR, self.BM25_DB_DIR]:
-            os.makedirs(dir_path, exist_ok=True)
+            dir_path.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _ensure_nltk_data() -> None:
+        import nltk
+        try:
+            nltk.data.find('tokenizers/punkt_tab')
+        except (LookupError, Exception):
+            print("📡 [Config] 正在初始化 NLTK 數據...")
+            try:
+                nltk.download('punkt', quiet=True)
+                nltk.download('punkt_tab', quiet=True)
+            except Exception:
+                pass
 
-# ==========================================
-# 全局單例
-# ==========================================
-_settings: Optional[Settings] = None
-
-
-def get_settings() -> Settings:
-    """獲取全局配置單例"""
-    global _settings
-    if _settings is None:
-        _settings = Settings()
-    return _settings
-
-
-settings = get_settings()
+# ============================
+# 单例导出
+# ============================
+settings = Settings()

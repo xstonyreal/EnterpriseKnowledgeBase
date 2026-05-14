@@ -40,6 +40,9 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
     2. 支持 UI 端的溯源預覽卡片。
     3. 嚴格執行「文件夾即權限」的業務域過濾。
     """
+    # 問答日志在終端的展示
+    logger.info(f"💬 用户提问：{query}")
+    logger.info(f"📂 业务域：{filter_domain}")
 
     query_l = query.lower().strip()
 
@@ -54,7 +57,7 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
     try:
         # 2. 🔍 [核心變動]：執行混合檢索，獲取 RRF 融合結果
         # top_n 取 settings.TOP_K * 2，為後續的 Domain 過濾預留空間
-        raw_results = search_svc.hybrid_search(query, top_n=settings.TOP_K * 3)
+        raw_results = search_svc.hybrid_search(query, top_n=settings.TOP_K * 2)
 
         if not raw_results:
             def empty_gen(): yield f"⚠️ 在業務域 **[{filter_domain}]** 中未發現相關線索，已攔截幻覺輸出。"
@@ -132,14 +135,16 @@ def get_chat_response_stream(query: str, filter_domain: str = None):
                 "domain_info": domain_info
             }):
                 yield chunk
+        # 增加UI界面成功標志
 
         return stream_generator(), sources
 
     except Exception as e:
-        logger.error(f"❌ 引擎执行异常: {str(e)}", exc_info=True)
+        error_info = str(e)
+        logger.error(f"❌ 引擎执行异常: {error_info}", exc_info=True)
 
         def err_gen():
-            yield f"❌ 链路震荡: {str(e)}"
+            yield f"❌ 链路震荡: {error_info}"
 
         return err_gen(), []
 

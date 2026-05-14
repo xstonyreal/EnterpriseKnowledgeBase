@@ -1,3 +1,5 @@
+# scheduler .py
+
 """
 定时任务模块 - 每日凌晨 2:00 全量重建 FAISS 索引
 
@@ -16,7 +18,10 @@ import streamlit as st
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.core.logger import logger
-from app.services.ingest_service import initialize_knowledge_base
+
+# --- [ 核心對齊：導入類並實例化 ] ---
+from app.services.ingest_service import IngestService
+ingest_manager = IngestService()
 
 # 全局调度器实例（模块级，仅在首次导入时创建）
 _scheduler = None
@@ -30,15 +35,10 @@ def start_daily_rebuild():
         1. 使用 Streamlit session_state 确保全局只启动一次
         2. 支持多会话/多进程环境（通过模块级变量 + session_state 双重防护）
         3. 应用退出时自动清理调度器资源
-
-    调用位置：
-        在 app_ui.py 或主入口文件中调用一次即可
-        例如：start_daily_rebuild()
     """
     global _scheduler
 
     # ========== 第一层防护：session_state（防止 Streamlit 重跑时重复启动）==========
-    # Streamlit 每次交互都会重跑整个脚本，使用 session_state 标记已启动状态
     if "scheduler_started" not in st.session_state:
         st.session_state.scheduler_started = False
 
@@ -84,26 +84,20 @@ def start_daily_rebuild():
 
 
 def _full_rebuild_job():
-    """
-    定时任务执行函数：全量重建索引
-
-    说明：
-        由调度器在后台线程中调用，不阻塞主业务流程。
-    """
+    """定時任務執行函數"""
     try:
-        logger.info("🔄 [定时任务] 开始执行每日全量索引重建...")
+        logger.info("🔄 [定時任務] 開始執行每日全量索引重建...")
 
-        # force_rebuild=True 会清空现有索引并基于 manifest 全量重建
-        # check_manifest 在 force_rebuild 模式下被忽略
-        vectorstore = initialize_knowledge_base(force_rebuild=True)
+        # ✅ 修復：通過實例對象 ingest_manager 調用類方法
+        vectorstore = ingest_manager.initialize_knowledge_base(force_rebuild=True)
 
         if vectorstore is not None:
-            logger.info("✅ [定时任务] 每日全量索引重建完成")
+            logger.info("✅ [定時任務] 每日全量索引重建完成")
         else:
-            logger.warning("⚠️ [定时任务] 全量索引重建返回 None，请检查数据源")
+            logger.warning("⚠️ [定時任務] 全量索引重建返回 None，請檢查數據源")
 
     except Exception as e:
-        logger.error(f"❌ [定时任务] 全量索引重建失败: {e}", exc_info=True)
+        logger.error(f"❌ [定時任務] 全量索引重建失敗: {e}", exc_info=True)
 
 
 def _shutdown_scheduler():
@@ -119,9 +113,7 @@ def _shutdown_scheduler():
 def trigger_manual_rebuild():
     """
     手动触发全量重建（供 UI 按钮调用）
-
-    用途：
-        除了定时任务外，管理员可通过此函数手动触发重建
     """
     logger.info("🔧 [手动触发] 开始执行全量索引重建...")
-    return initialize_knowledge_base(force_rebuild=True)
+    # ✅ 修復：同樣改用實例化調用，不再直接調用未導入的全局函數
+    return ingest_manager.initialize_knowledge_base(force_rebuild=True)

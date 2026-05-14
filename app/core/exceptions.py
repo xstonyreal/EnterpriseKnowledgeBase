@@ -22,23 +22,17 @@
 
 from typing import Optional, Dict, Any
 
-
-# ========== 基礎異常類 ==========
-
 class MatrixBaseException(Exception):
     """Matrix Intelligence 統一異常基類"""
-
     def __init__(
             self,
             message: str,
             code: str = "INTERNAL_ERROR",
-            details: Optional[Dict[str, Any]] = None,
-            original_exception: Optional[Exception] = None
+            details: Optional[Dict[str, Any]] = None
     ):
         self.message = message
         self.code = code
         self.details = details or {}
-        self.original_exception = original_exception
         super().__init__(self.message)
 
     def dehydrate(self) -> Dict[str, Any]:
@@ -51,27 +45,14 @@ class MatrixBaseException(Exception):
         }
 
     def _is_recoverable(self) -> bool:
-        """判斷錯誤是否可恢復"""
         recoverable_codes = {"RATE_LIMIT", "TIMEOUT", "EMPTY_RESULT", "CONNECTION_RESET"}
         return self.code in recoverable_codes
 
-
-# ========== 具體異常類型 ==========
-
-def dehydrate_exception(e: Exception, message: str = "處理失敗") -> Dict[str, Any]:
-    """將異常轉為可安全傳遞的字典"""
+def dehydrate_exception(e: Exception, message: str = "引擎處理失敗") -> Dict[str, Any]:
+    """將原生異常轉化為脫水 JSON 字典"""
     return {
         "error": True,
         "code": type(e).__name__,
         "message": message,
         "details": {"raw": str(e)}
-    }
-
-
-def make_error_response(code: str, message: str) -> Dict[str, Any]:
-    """快速構造錯誤響應"""
-    return {
-        "error": True,
-        "code": code,
-        "message": message
     }

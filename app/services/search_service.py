@@ -2,156 +2,197 @@
 import os
 import pickle
 import jieba
-import hashlib
+import hashlib  # 新增：用於生成 chunk 的 MD5 哈希
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict
 from langchain_community.vectorstores import FAISS
 from app.config import settings
 from app.models.embeddings import embeddings
 from app.core.logger import logger
 
-
+# 1. 向量路徑搜尋 -> 得到 vector_list
+# 2. 關鍵字路徑搜尋 -> 得到 bm25_list
+# 3. 遍歷這兩個 list，根據排名計算 RRF 分數
+# 4. 重新排序，返回最聰明的 Top_N
 class SearchService:
     def __init__(self):
-        self.vector_db_path = settings.VECTOR_DB_DIR
-        self.bm25_db_path = os.path.join(settings.BM25_DB_DIR, "bm25.pkl")
+        # 【修改點】統一使用 Path 對象並 resolve 為絕對路徑，消除環境變量污染
+        self.vector_db_path = settings.VECTOR_DB_DIR.resolve()
+        self.bm25_db_path = settings.BM25_DB_DIR.resolve()
+
         self.vectorstore = None
         self.bm25_data = None
 
-        # 初始化加載索引
+        # 初始化加載
         self._load_indices()
 
     def _load_indices(self):
-        """加載雙路索引至內存（向量 + 關鍵字）"""
-        try:
-            # 1. 加載 FAISS
-            if os.path.exists(os.path.join(self.vector_db_path, "index.faiss")):
+        """加載雙路索引至內存"""
+        """加載雙路索引至內存"""
+        # 【修改點】嚴格區分「目錄」與「文件」路徑
+        faiss_dir = self.vector_db_path
+        faiss_file = faiss_dir / "index.faiss"
+
+        # 修正：BM25 的完整文件路徑
+        bm25_file = self.bm25_db_path / "bm25.pkl"
+
+        # 1. 加載 FAISS
+        if faiss_file.exists():
+            try:
                 self.vectorstore = FAISS.load_local(
-                    self.vector_db_path,
+                    str(faiss_dir),  # FAISS 需要目錄字符串
                     embeddings,
                     allow_dangerous_deserialization=True
                 )
-                logger.info("📡 [SearchService] FAISS 向量庫加載成功。")
-            else:
-                logger.warning(f"⚠️ [SearchService] 向量庫路徑不存在: {self.vector_db_path}")
+                logger.info(f"📡 [Search] FAISS 加載成功。絕對路徑: {faiss_file}")
+            except Exception as e:
+                logger.error(f"❌ [Search] FAISS 加載異常: {str(e)}")
+        else:
+            logger.warning(f"⚠️ [Search] FAISS 文件物理缺失: {faiss_file}")
 
-            # 2. 加載 BM25
-            if os.path.exists(self.bm25_db_path):
-                with open(self.bm25_db_path, "rb") as f:
+        # 2. 加載 BM25
+        # 【修改點】使用剛才定義的 bm25_file (文件路徑)，而不是 self.bm25_db_path (目錄路徑)
+        bm25_file = self.bm25_db_path / "bm25.pkl"
+        if bm25_file.exists() and bm25_file.is_file():
+            try:
+                with open(bm25_file, "rb") as f:
                     self.bm25_data = pickle.load(f)
-                logger.info("📡 [SearchService] BM25 關鍵字庫加載成功。")
-            else:
-                logger.warning(f"⚠️ [SearchService] BM25 庫路徑不存在: {self.bm25_db_path}")
-        except Exception as e:
-            logger.error(f"🚨 [SearchService] 加載索引失敗: {e}")
+                logger.info(f"📡 [Search] BM25 加載成功。絕對路徑: {bm25_file}")
+            except Exception as e:
+                # 轉存錯誤消息，防止閉包 NameError
+                err_msg = str(e)
+                logger.error(f"❌ [Search] BM25 讀取異常: {err_msg}")
+                self.bm25_data = None
+        else:
+            # 如果走到這裡報 vector_db，日誌會直接抓出 settings 的現形
+            logger.error(f"❌ [Search] BM25 文件缺失。嘗試路徑: {bm25_file}")
+            logger.info(f"🔍 [Debug] 當前 settings.BM25_DB_DIR 指向: {settings.BM25_DB_DIR}")
+            self.bm25_data = None
 
     @staticmethod
-    def _get_chunk_id(source: str, content: str) -> str:
-        """為 chunk 生成唯一 ID，用於 RRF 融合對齊"""
+    def _get_chunk_id(source: str, content: str, prefix: str = "") -> str:
+        """
+        為 chunk 生成唯一 ID（基於內容 MD5 哈希）
+
+        參數:
+            source: 來源文件路徑
+            content: chunk 的完整內容
+            prefix: 前綴（可選，用於調試）
+
+        返回:
+            唯一標識符，格式: {source}_{content_md5}
+        """
         content_hash = hashlib.md5(content.encode()).hexdigest()
-        return f"{source}_{content_hash}"
+        return f"{prefix}{source}_{content_hash}" if prefix else f"{source}_{content_hash}"
 
     @staticmethod
-    def _rrf_score(ranks: List[int], k: int = 60) -> float:
-        """RRF (Reciprocal Rank Fusion) 核心算法"""
+    def _rrf_score( ranks: List[int], k: int = 60) -> float:
+        """
+        RRF (Reciprocal Rank Fusion) 核心算法
+        原理：得分 = 1 / (k + 排名)
+        """
         score = 0.0
         for rank in ranks:
             score += 1.0 / (k + rank)
         return score
 
-    def hybrid_search(self, query: str, domain: Optional[str] = None, top_n: int = 5) -> List[Dict]:
+    def hybrid_search(self, query: str, top_n: int = 5) -> List[Dict]:
         """
-        【核心】混合檢索入口
-        支持語義向量 + BM25 關鍵詞，並通過 RRF 算法融合
+        【核心】混合檢索入口,加入了懶加載（Lazy Loading）機制，防止冷啟動或同步後未及時加載的問題
         """
+        # 如果內存中索引為空，嘗試即時觸發一次加載（自動補救）
         if not self.vectorstore or not self.bm25_data:
-            logger.warning("⚠️ 索引未就緒，嘗試單獨檢索或報錯。")
+            logger.warning("⚠️ 索引未就緒，回退至單路搜索或報錯。")
+            self._load_indices()
+
+        # 再次檢查，若仍加載失敗則回退，避免後續邏輯報錯
+        if not self.vectorstore:
+            logger.warning("⚠️ 索引加載失敗，無法執行檢索，請檢查索引文件是否已生成。")
             return []
 
-        # --- 第一路：向量檢索 (Vector Search) ---
-        # 這裡直接注入分域過濾 (Metadata Filter)
-        search_kwargs = {"k": top_n * 2}
-        if domain and domain != "全局":
-            search_kwargs["filter"] = {"domain": domain}
+        # --- 第一路：向量檢索 ---
+        # 返回 (Document, Score)
+        vector_results = self.vectorstore.similarity_search_with_relevance_scores(query, k=top_n * 2)
 
-        vector_results = self.vectorstore.similarity_search_with_relevance_scores(
-            query,
-            **search_kwargs
-        )
+        # --- 第二路：BM25 檢索 (作為增強) ---
+        # 【修改點】將 BM25 邏輯完全包裹在狀態檢查中
+        top_n_indices = []
+        bm25_docs = []
 
-        # --- 第二路：BM25 檢索 (Keyword Search) ---
-        tokenized_query = jieba.lcut_for_search(query)
-        bm25_instance = self.bm25_data["instance"]
-        bm25_docs = self.bm25_data["documents"]
+        # 獲取 BM25 得分並排序
 
-        # 計算 BM25 得分
-        doc_scores = bm25_instance.get_scores(tokenized_query)
+        # 【修正點】增加判斷，防止 NoneType 報錯
+        if self.bm25_data is not None and isinstance(self.bm25_data, dict):
+            try:
+                tokenized_query = jieba.lcut_for_search(query)
+                bm25_instance = self.bm25_data.get("instance")
+                bm25_docs = self.bm25_data.get("documents", [])
 
-        # 過濾邏輯：如果指定了域，只考慮該域下的文檔
-        eligible_indices = []
-        for i, doc in enumerate(bm25_docs):
-            if not domain or domain == "全局" or doc.metadata.get("domain") == domain:
-                eligible_indices.append(i)
-
-        # 在符合域條件的文檔中進行排名
-        if not eligible_indices:
-            top_bm25_indices = []
+                if bm25_instance:
+                    doc_scores = bm25_instance.get_scores(tokenized_query)
+                    top_n_indices = np.argsort(doc_scores)[::-1][:top_n * 2]
+            except Exception as e:
+                logger.error(f"⚠️ [Search] BM25 檢索異常: {str(e)}")
         else:
-            # 僅對 eligible_indices 的分數進行排序
-            sub_scores = doc_scores[eligible_indices]
-            # 獲取相對位置的 top_n
-            relative_top_n = np.argsort(sub_scores)[::-1][:top_n * 2]
-            # 映射回全局索引
-            top_bm25_indices = [eligible_indices[idx] for idx in relative_top_n]
+            logger.warning("⚠️ BM25 數據不可用，本次僅使用向量路。")
 
-        # --- 第三路：RRF 融合 (Reciprocal Rank Fusion) ---
-        all_docs = {}
+        # --- 第三路：RRF 融合 ---
+        all_docs = {}  # 用於存放融合後的結果
 
-        # 處理向量排名得分 (Rank 1 開始)
+        # 處理向量排名
         for rank, (doc, _) in enumerate(vector_results):
-            doc_id = self._get_chunk_id(doc.metadata.get('source', 'unknown'), doc.page_content)
+            # 修改點：doc_id 原本使用 doc.page_content（可能導致不同文件內容相同時錯誤合併）
+            # 改為使用 "來源檔名_排名_內容前50字" 作為唯一識別碼
+            # .get('source', 'unknown') 中的 'unknown' 是防呆預設值，當 metadata 中沒有 source 鍵時使用
+            # ============================================================
+            # 【優化方案記錄】doc_id 生成邏輯（當前保留原始代碼）by DS
+            # ============================================================
+            # 問題：當前使用 doc.page_content[:50] 可能洩露隱私，且兩路檢索 ID 不一致
+            # 建議改進：使用內容 MD5 哈希值作為唯一標識
+            #
+            # 改進後代碼示例（僅供參考，當前未啟用）：
+            # import hashlib
+            # content_hash = hashlib.md5(doc.page_content.encode()).hexdigest()
+            # doc_id = f"vec_{doc.metadata.get('source', 'unknown')}_{content_hash}"
+            #
+            # 優點：
+            # 1. 不洩露原始內容（哈希不可逆）
+            # 2. 同一 chunk 在向量和 BM25 中 ID 一致，可正確融合
+            # 3. 與項目中 hash_utils.py 的 MD5 指紋邏輯保持一致
+            # ============================================================
+            # 使用基於 MD5 的唯一 ID，不再包含內容原文和前綴區分
+            # doc_id = f"vec_{doc.metadata.get('source', 'unknown')}_{rank}_{doc.page_content[:50]}" # 使用內容作為唯一標識，或使用 metadata 中的 source
+            doc_id = self._get_chunk_id(
+                source=doc.metadata.get('source', 'unknown'),
+                content=doc.page_content
+            )
             if doc_id not in all_docs:
                 all_docs[doc_id] = {"doc": doc, "ranks": []}
             all_docs[doc_id]["ranks"].append(rank + 1)
 
-        # 處理 BM25 排名得分
-        for rank, idx in enumerate(top_bm25_indices):
+        # 處理 BM25 排名
+        for rank, idx in enumerate(top_n_indices):
             doc = bm25_docs[idx]
-            doc_id = self._get_chunk_id(doc.metadata.get('source', 'unknown'), doc.page_content)
+            # ============================================================
+            # 【優化方案記錄】同上，doc_id 生成邏輯待優化
+            # 改進後應與向量檢索使用相同的哈希計算方式，確保 ID 一致
+            # ============================================================
+            doc_id = self._get_chunk_id(
+                source=doc.metadata.get('source', 'unknown'),
+                content=doc.page_content
+            )
             if doc_id not in all_docs:
                 all_docs[doc_id] = {"doc": doc, "ranks": []}
             all_docs[doc_id]["ranks"].append(rank + 1)
 
-        # 計算融合後的 RRF 得分
+        # 計算最終 RRF 得分並排序
         final_results = []
         for doc_id, data in all_docs.items():
-            score = self._rrf_score(data["ranks"])
-            final_results.append((data["doc"], score))
+            rrf_score = self._rrf_score(data["ranks"])
+            final_results.append((data["doc"], rrf_score))
 
-        # 按總分降序排序
+        # 按 RRF 得分降序排列
         final_results.sort(key=lambda x: x[1], reverse=True)
 
-        # 封裝結果返回
-        return [
-            {
-                "content": doc.page_content,
-                "metadata": doc.metadata,
-                "score": score
-            }
-            for doc, score in final_results[:top_n]
-        ]
-
-
-# ============================================================
-# 【工程化出口】
-# 實例化單例並暴露簡單的函數接口，供 chat.py 調用
-# ============================================================
-
-_service = SearchService()
-
-
-def do_hybrid_search(query: str, domain: str = None, top_k: int = 5):
-    """
-    對外封裝接口：供問答鏈條調用的純淨函數
-    """
-    return _service.hybrid_search(query, domain=domain, top_n=top_k)
+        return [{"content": doc.page_content, "metadata": doc.metadata, "score": score}
+                for doc, score in final_results[:top_n]]

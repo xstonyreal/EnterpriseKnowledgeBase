@@ -199,50 +199,54 @@ L3	定时重建	每日 02:00 清理墓碑标记
 ## 📂 完整目錄結構
 
 ```text
-EnterpriseKnowledgeBase/  
+EnterpriseKnowledgeBase/
 ├── .env                    # 【核心配置】隔離敏感信息（模型版本/數據庫地址/路徑）
 ├── .gitignore              # 【資產過濾】防止緩存、索引及虛擬環境推送到 Git
 ├── plan.md                 # 【研發路線】記錄 Sprint 計劃、待辦事項與 Bug 進行度
 ├── Architecture Contract.md # 【開發規約】約束代碼風格、層級調用邏輯與職責邊界
-├── main.py                 # 【入口 A】後端 CLI 交互中心，用於本地測試與維護
-├── app_ui.py               # 【入口 B】Streamlit 全棧 UI，業務操作終端
+├── main.py                 # 【入口】Streamlit 全棧 UI 終端 (原 app_ui.py)
+├── scheduler.py            # 【維護】定時任務：每日凌晨 2:00 全量重建索引
+├── reset_env.py            # 【工具】環境重置腳本：一鍵清空向量庫與指紋紀錄
 ├── requirements.txt        # 【環境依賴】項目運行所需的 Python 庫清單
+├── models/                 # 本地CPU處理
+│   └── bge_reranker_base/  # BGE Reranker (精排) ,防幻覺，分詞
 │  
 ├── data/                   # 【數據資產層】
-│   ├── uploads/            # [輸入] 原始業務文檔，支持按部門/業務線創建子文件夾
-│   └── vector_db/          # [輸出] 持久化 FAISS 語義索引，支持"秒級加載"
+│   ├── uploads/            # [輸入] 原始業務文檔，支持業務域（Domain）子文件夾
+│   └── vector_db/          # [輸出] 持久化 FAISS 索引、BM25 模型及 manifest.json
 │  
 └── app/                    # 【邏輯心臟層】
     ├── __init__.py         # 模塊導出聲明
-    ├── config.py           # 全局配置單例：基於 Pydantic 的類型安全配置管理
-    │  
-    ├── api/                # 【接口層】基於 FastAPI 的分佈式擴展預留
-    │   ├── chat.py         # 對話狀態管理、會話持久化邏輯
-    │   └── endpoints.py    # 外部 API 路由分發中心
+    ├── config.py           # 全局配置單例：Pydantic 驅動，定義模型參數與路徑
+    ├── ui_logger.py        # UI 專用日誌緩存：對接前端「實時運行日誌」面板
     │  
     ├── core/               # 【引擎層】RAG 系統的核心大腦
-    │   ├── engine.py       # 調度核心：負責檢索、上下文組裝與 LLM 推理聯動
-    │   ├── logger.py       # 審計系統：全局結構化日誌記錄與錯誤追蹤
-    │   └── prompts.py      # 提示詞庫：多場景專家級 Prompt 模板
+    │   ├── engine.py       # 調度核心：負責檢索、業務域過濾、Rerank 與流式問答
+    │   ├── logger.py       # 審計系統：全局結構化日誌記錄，防止 Handler 重複掛載
+    │   ├── exceptions.py   # 異常脫水協議：定義 MatrixBaseException 及 Snapshots 邏輯
+    │   └── prompts.py      # 提示詞庫：針對本地模型優化的多場景 Prompt 模板
+    │
+    ├── storage/            # 【存儲適配層】
+    │   └── vector_db.py    # 👈 向量庫驅動：負責 FAISS 索引的物理加載與單例管理
     │  
-    ├── models/             # 【模型層】異構計算適配
-    │   ├── llm.py          # 本地認知引擎封裝 (Ollama/Qwen)
-    │   └── embeddings.py   # 向量化模型封裝 (Nomic/HuggingFace)
+    ├── models/             # 【模型層】異構計算適配與單例實例化
+    │   ├── llm.py          # 本地認知引擎：ChatOllama 封裝 (Qwen/Llama)
+    │   └── embeddings.py   # 向量化模型：OllamaEmbeddings 封裝 (Nomic)
     │  
     ├── pipeline/           # 【流水線層】非結構化數據治理
-    │   ├── ingest.py       # 數據分片 (Chunking) 與向量入庫核心原子操作
-    │   ├── loader.py       # 多模態適配器：PDF、Word、TXT、Markdown 的解析
-    │   └── watcher.py      # 文件探測邏輯：獲取目錄結構、元數據提取
+    │   ├── ingest.py       # 原子操作：負責數據清洗、分片與向量寫入
+    │   ├── loader.py       # 解析適配器：支持 PDF、Word、TXT，顯式拒絕 Excel
+    │   └── watcher.py      # 文件探測邏輯：指紋清單 (Manifest) 生成與 MD5 掃描
     │  
-    ├── services/           # 【服務層】業務邏輯聚合
-    │   ├── ingest_service.py  # 調度中樞：處理重構、併發入庫與生命週期管理
-    │   ├── watcher_service.py # 異步服務：目錄變更的監聽與熱掛載調度
-    │   └── search_service.py  # 混合檢索引擎（FAISS + BM25 + RRF）
-    │  
-    ├── storage/            # 【存儲適配層】
-    │   └── vector_db.py    # 向量數據庫驅動：執行語義搜索與 Metadata 過濾
+    ├── services/           # 【服務層】業務邏輯聚合與併發管理
+    │   ├── ingest_service.py  # 調度中樞：管理入庫鎖 (Lock) 與知識庫初始化邏輯
+    │   ├── watcher_service.py # 異步監聽：FileSystemEventHandler 的熱掛載調度
+    │   ├── search_service.py  # 混合檢索：FAISS + BM25 + RRF (Reciprocal Rank Fusion)
+    │   ├── rerank_service.py  # 精排服務：Cross-Encoder 模型二次排序邏輯
+    │   └── domain_service.py  # 域管理：業務域的 CRUD、狀態切換及物理同步
     │  
     └── utils/              # 【工具集】通用邏輯復用
+        └── hash_utils.py   # 哈希工具：分塊讀取文件並計算 MD5 指紋
 📖 API 参考
 initialize_knowledge_base(force_rebuild=False, check_manifest=True)
 参数	类型	默认值	说明

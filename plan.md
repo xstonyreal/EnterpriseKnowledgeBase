@@ -393,4 +393,9 @@ git push origin dev
 優化導入路徑與 sys.path 適配，支持「模塊運行」與「腳本運行」雙模式。
 
 
+2026-05-14 by Gemini
+1.斷點續傳：在 ingest.py 中增加針對超大型 PDF 的切片保存機制。
 
+2.監控自愈：當 watcher_service.py 檢測到物理目錄丟失時，自動調用 domain_service.py 進行補全。
+
+3.併發優化：在 rerank_service.py 中引入 Batch 處理，提升多片段重排的效率。
