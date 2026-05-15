@@ -244,7 +244,7 @@ with col_chat:
             with st.chat_message("assistant"):
                 response_placeholder = st.empty()
                 full_response = ""
-                stream_gen, sources = get_chat_response_stream(prompt, filter_domain=selected_domain)
+                stream_gen, sources, metrics = get_chat_response_stream(prompt, filter_domain=selected_domain)
 
                 for chunk in stream_gen:
                     full_response += chunk

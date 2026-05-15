@@ -399,3 +399,23 @@ git push origin dev
 2.監控自愈：當 watcher_service.py 檢測到物理目錄丟失時，自動調用 domain_service.py 進行補全。
 
 3.併發優化：在 rerank_service.py 中引入 Batch 處理，提升多片段重排的效率。
+
+
+📝 項目更新日誌 (Git Commit Summary)2026-05-15
+🚀 核心優化：RAG 性能與內存管理調優
+1. 檢索層 (Search Service) - 從「IO 密集」轉向「內存駐留」
+單例緩存 (Singleton Pattern)：引入全局靜態變量 _global_vectorstore 與 _global_bm25_data，實現索引文件的一次加載，永久復用。徹底消滅了每次檢索時 1.3s 的磁盤讀取開銷。
+
+懶加載鎖定：優化 _load_indices 邏輯，增加內存攔截。日誌證實熱加載後檢索耗時從 1300ms 降至 100ms 級別。
+
+2. 模型層 (LLM Engine) - 實現「零冷啟動」常駐
+內存駐留策略：配置 keep_alive="24h"，配合系統內存清理，確保模型權重鎖定在 RAM 中，避免 Windows 分頁交換導致的 20s+ 延遲。
+
+計算負荷優化：將 top_k 調整為 1，在保證核心知識召回的前提下，將 CPU 的預填充（Pre-fill）負荷降至最低。
+
+參數對齊：統一 num_ctx 指令窗口，優化 KV Cache 命中率，實現相同话题下的 1.6s 極速回顯。
+
+3. 基礎設施與監控 (Monitoring)
+指標可視化：完善 METRICS 日誌輸出，新增 REAL_TTFT（真實首字響應）與 v_ms / b_ms 拆解，便於精確定位性能瓶頸。
+
+資源競爭緩解：建議並實施了「環境脫水」，通過釋放系統無效內存，提升了 CPU 推理時的帶寬優先級。

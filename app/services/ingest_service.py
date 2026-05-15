@@ -1,6 +1,5 @@
 # app/services/ingest_service.py
-# app/services/ingest_service.py
-# app/services/ingest_service.py
+
 import os
 import json
 import time
@@ -175,10 +174,12 @@ def _get_manifest_diff() -> Tuple[Dict[str, str], int, bool]: # noqa: W0212
     return current_manifest, total_diff, total_diff > 0
 
 # 切片入库
-def _handle_rebuild_logic(documents: List[Document], current_manifest: Dict[str, str]) -> FAISS: # noqa: W0212
+def _handle_rebuild_logic(documents: List[Document], current_manifest: Dict[str, str], progress_callback=None) -> FAISS: # noqa: W0212
     logger.info(f"📊 [负载感知] 待处理切片: {len(documents)}，批次规模: {settings.BATCH_SIZE}")
     vectorstore = None
     start_time = time.time()
+    # === [新增] 計算總批次用於進度條 ===
+    total_batches = (len(documents) + settings.BATCH_SIZE - 1) // settings.BATCH_SIZE
 
     for i in range(0, len(documents), settings.BATCH_SIZE):
         batch = documents[i: i + settings.BATCH_SIZE]
@@ -202,15 +203,28 @@ def _handle_rebuild_logic(documents: List[Document], current_manifest: Dict[str,
         else:
             vectorstore.add_documents(batch)
 
+        # === [新增：進度回傳注入] ===
+        current_batch_num = (i // settings.BATCH_SIZE) + 1
+        if progress_callback:
+            # 向量化階段佔據 0-90% 的進度條
+            pct = int((current_batch_num / total_batches) * 90)
+            progress_callback(pct, f"⚡ 向量化中: {current_batch_num}/{total_batches} 批次 (Token: {batch_tokens})")
+
         if (i // settings.BATCH_SIZE) % 5 == 0 or (i + len(batch) >= len(documents)):
             logger.info(f"🚀 [计算中] 向量化进度: {(i + len(batch)) / len(documents) * 100:.1f}%")
 
     # --- [Hybrid 注入] ---
     if vectorstore:
+        # === [新增：BM25 階段進度] ===
+        if progress_callback: progress_callback(95, "📂 正在同步構建 BM25 關鍵字索引...")
+
         _save_bm25_index(documents) # 同步構建關鍵字索引
         os.makedirs(db_path, exist_ok=True)
         safe_save_vectorstore(vectorstore, db_path)
         save_manifest(current_manifest)  # 全量重建
+
+        # === [新增：完成進度] ===
+        if progress_callback: progress_callback(100, "✅ 知識庫重塑完成")
 
         duration = time.time() - start_time
         logger.info(f"✅ [重塑成功] 耗时: {duration:.2f}s | 状态: 索引与指纹已双向锁定。")
@@ -427,7 +441,7 @@ def _cleanup_old_backups(db_path: str, keep_count: int = 3):
 # 2. 增量执行函数 (Incremental - 物理差量层)
 # ==========================================
 
-def _execute_incremental_sync(current_manifest):
+def _execute_incremental_sync(current_manifest, progress_callback=None):
     """
     【设计依据 - 物理差量层】
     1. 核心：仅对 Added/Changed 名单进行解析，并执行向量库物理剔除。
@@ -472,6 +486,10 @@ def _execute_incremental_sync(current_manifest):
             if not os.path.exists(full_path):
                 logger.error(f"❌ [路径失效] 找不到资产: {full_path}")
                 continue
+            # --- [進度上報注入] ---
+            if progress_callback:
+                p_pct = int(((idx + 1) / len(added_or_changed)) * 40)
+                progress_callback(p_pct, f"解析資產: {os.path.basename(full_path)}")
 
             # --- [正確位置] 注入磁盤讀取日誌 ---
             file_size = os.path.getsize(full_path) / 1024
@@ -496,6 +514,7 @@ def _execute_incremental_sync(current_manifest):
 
             # --- 动作 A: 处理移除 ---
             if deleted_files:
+                if progress_callback: progress_callback(50, f"剔除失效索引: {len(deleted_files)} 個文件")  # [進度]
                 for f in deleted_files:
                     # 必須與 ingest.py 中的歸一化邏輯 100% 一致
                     # target_key = os.path.basename(f)  這裏取值不對，是從完整路徑裏取出來文件名，在這裏丟失了path
@@ -512,15 +531,19 @@ def _execute_incremental_sync(current_manifest):
                         logger.warning(f"⚠️ [清理跳過] 索引中未找到文件標籤: {target_key}")
             # --- 动作 B: 处理新增/修改 ---
             if incremental_docs:
+                if progress_callback: progress_callback(70, f"寫入新片段: {len(incremental_docs)} 個切片")  # [進度]
                 _CACHED_VECTORSTORE.add_documents(incremental_docs)
                 logger.info(f"📊 [追加完成] 累计写入 {len(incremental_docs)} 个新切片")
 
             # --- [M3 核心注入]：重构 BM25 ---
             # 无论增删，只要变动，就从当前向量库提取全量 Document 重構 BM25
-            all_docs = list(_CACHED_VECTORSTORE.docstore._dict.values()) # noqa: W0212
+            if progress_callback: progress_callback(85, "同步重構 BM25 關鍵字索引...") # [進度]
+            # all_docs = list(_CACHED_VECTORSTORE.docstore._dict.values()) # noqa: W0212
+            all_docs= list(_CACHED_VECTORSTORE.docstore._dict.values())
             _save_bm25_index(all_docs)
 
             # 5. 【固化层】
+            if progress_callback: progress_callback(95, "正在固化索引磁盤文件...")  # [進度]
             logger.info(f"💾 [磁盤寫入] 正在固化 FAISS 索引至: {db_path}")
             safe_save_vectorstore(_CACHED_VECTORSTORE, db_path)
             # 在旧 manifest 基础上，删除已移除文件 + 更新新增/修改文件的指纹
@@ -541,6 +564,7 @@ def _execute_incremental_sync(current_manifest):
             if os.path.exists(idx_file):
                 logger.info(f"📈 [物理變動] index.faiss 最終大小: {os.path.getsize(idx_file) / 1024:.2f} KB")
 
+        if progress_callback: progress_callback(100, "✅ 同步成功")  # [完成]
         total_duration = time.time() - start_time
         logger.info(f"✅ [同步成功] 总耗時: {total_duration:.2f}s | 状态：向量库与 BM25 已锁定。")
         return _CACHED_VECTORSTORE
@@ -552,7 +576,7 @@ def _execute_incremental_sync(current_manifest):
 # ==========================================
 # 3. 全量同步 (物理覆盖)
 # ==========================================
-def _execute_full_rebuild(current_manifest):
+def _execute_full_rebuild(current_manifest, progress_callback=None):
     print(f"\n🔥 [调试] _execute_full_rebuild 开始执行")
     print(f"🔥 [调试] current_manifest 长度 = {len(current_manifest)}")
     """
@@ -560,6 +584,9 @@ def _execute_full_rebuild(current_manifest):
     """
     global _CACHED_VECTORSTORE
     import shutil  # 確保導入
+    all_docs = _parallel_load_and_split()
+    # 調用底層入庫邏輯時透傳
+    new_vs = _handle_rebuild_logic(all_docs, current_manifest, progress_callback=progress_callback)
     print(f"\n========================= 🚀 [场景3: 全量重塑] =========================")
     # 🔍 診斷：打印路徑
     print(f"db_path: {db_path}")
@@ -586,7 +613,7 @@ def _execute_full_rebuild(current_manifest):
             return None
 
         # 調用底層入庫邏輯
-        new_vs = _handle_rebuild_logic(all_docs, current_manifest)
+        new_vs = _handle_rebuild_logic(all_docs, current_manifest, progress_callback=progress_callback)
 
         with _DB_RW_LOCK:
             _CACHED_VECTORSTORE = new_vs
@@ -599,7 +626,7 @@ def _execute_full_rebuild(current_manifest):
 # ==========================================
 # 4. 主入口分流 (Dispatcher - 逻辑指挥部)
 # ==========================================
-def initialize_knowledge_base(force_rebuild=False, check_manifest=True, is_ui_click=False):
+def initialize_knowledge_base(force_rebuild=False, check_manifest=True, is_ui_click=False, progress_callback=None):
     """
     【RAG 核心調度指揮部 - 扁平化原子決策引擎】
     """
@@ -621,7 +648,7 @@ def initialize_knowledge_base(force_rebuild=False, check_manifest=True, is_ui_cl
         print(f"🔴 [调试] 进入强制全量分支")
         print(f"🔴 [调试] 当前 _CACHED_VECTORSTORE = {_CACHED_VECTORSTORE}")
 
-        _CACHED_VECTORSTORE = _execute_full_rebuild(current_manifest)
+        _CACHED_VECTORSTORE = _execute_full_rebuild(current_manifest, progress_callback=progress_callback)
         # 關鍵點：增加 or is_ui_click
         print(f"🔴 [调试] 全量重建完成，结果 = {_CACHED_VECTORSTORE}")
 
@@ -630,7 +657,7 @@ def initialize_knowledge_base(force_rebuild=False, check_manifest=True, is_ui_cl
     elif not index_exists or (has_diff and check_manifest) or is_ui_click:
         # 注意：save_manifest 被移入 _execute_incremental_sync 內部，
         # 確保「解析 -> 向量化 -> BM25 -> 固化」全部成功後才更新指紋。
-        _CACHED_VECTORSTORE = _execute_incremental_sync(current_manifest)
+        _CACHED_VECTORSTORE = _execute_incremental_sync(current_manifest, progress_callback=progress_callback)
 
     # --- [場景 3: 靜默啟動/資產一致] ---
     else:
@@ -646,6 +673,7 @@ def initialize_knowledge_base(force_rebuild=False, check_manifest=True, is_ui_cl
                     embeddings,
                     allow_dangerous_deserialization=True
                 )
+        if progress_callback: progress_callback(100, "✅ 索引已就緒（無需更新）")
 
     # 3. 邏輯閉環：激活實時監控哨兵
     from app.services.watcher_service import start_sentinel

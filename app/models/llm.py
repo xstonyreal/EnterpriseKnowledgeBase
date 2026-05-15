@@ -3,13 +3,14 @@
 import os
 from langchain_ollama import ChatOllama
 from app.config import settings
+from app.core.logger import logger
 
+# 1.【聲明】：定義私有單例坑位，初始為 None
+_llm_instance = None
 
 # ==========================================
 # 判断.env 文件是否存在
 # ==========================================
-from app.core.logger import logger
-
 def check_protocol_safety():
     env_path = ".env"
     if os.path.exists(env_path):
@@ -40,19 +41,29 @@ def get_llm():
         base_url=settings.OLLAMA_BASE_URL,
         temperature=settings.LLM_TEMPERATURE,  # 建议从配置中读取
         num_ctx=settings.LLM_NUM_CTX,  # 👈 必须引用 settings，保持协议一致
-        timeout=settings.LLM_TIMEOUT,  # 【关键】本地连接超时延长至 2分钟
+        # timeout=settings.LLM_TIMEOUT,  # 【关键】本地连接超时延长至 2分钟
         # repeat_penalty=1.1,      # 可选：防止模型复读机
+        # num_gpu=1,  # 👈 改成 1，激活顯卡！
+        keep_alive="24h",  # 防止模型被自動卸載
+        # num_thread=8  # 使用 8 個 CPU 線程輔助
     )
 
     return llm
 
-
-# 全局单例：确保整个应用生命周期内，显存中只驻留一个模型实例
-try:
-    llm = get_llm()
-    logger.info("✅ 本地认知引擎单例化成功")
-except Exception as e:
-    # 这里应用我们的“异常脱水”协议
-    error_msg = str(e)
-    logger.error(f"❌ 本地引擎启动失败: {error_msg}")
-    llm = None
+# 2.【實例化 & 按需加載 & 常駐內存】：
+# 新增此函數作為外部獲取模型的唯一入口
+def get_cached_llm():
+    """
+    全局单例：确保整个应用生命周期内，显存/内存中只驻留一个模型实例。
+    采用懒加载模式，只有在第一次调用时才会真正初始化模型。
+    """
+    global _llm_instance
+    if _llm_instance is None:
+        try:
+            _llm_instance = get_llm()
+            logger.info("✅ 本地认知引擎單例懶加載成功")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ 本地引擎启动失败: {error_msg}")
+            _llm_instance = None
+    return _llm_instance

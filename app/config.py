@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     ENABLE_RERANK: bool = False
     CHUNK_SIZE: int = 400
     CHUNK_OVERLAP: int = 50
-    TOP_K: int = 5
+    TOP_K: int = 1
     RETRIEVAL_OVERSIZE_RATIO: int = 3
     RRF_K: int = 60
     HYBRID_SEARCH_WEIGHTS: List[float] = [0.6, 0.4]
